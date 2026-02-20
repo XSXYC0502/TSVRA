@@ -50,14 +50,20 @@ private:
         bool has_parent;    // 是否有父节点
         Point redundant_via; // 如果使用了冗余TSV绕行，记录冗余TSV位置
         bool used_redundant; // 是否使用了冗余TSV
-        
-        AStarNode() 
-            : position(), g_cost(0), h_cost(0), f_cost(0), 
-              parent(), has_parent(false), redundant_via(), used_redundant(false) {}
-        
-        AStarNode(Point pos, double g, double h, Point p, bool hp, Point rv = Point(), bool ur = false)
+        uint32_t hop_count; // 从起点的跳数（用于L_max约束）
+        double risk_sum;    // 累计风险 ∑(-ln(1-pfail))（用于R_min约束）
+
+        AStarNode()
+            : position(), g_cost(0), h_cost(0), f_cost(0),
+              parent(), has_parent(false), redundant_via(), used_redundant(false),
+              hop_count(0), risk_sum(0.0) {}
+
+        AStarNode(Point pos, double g, double h, Point p, bool hp,
+                  Point rv = Point(), bool ur = false,
+                  uint32_t hc = 0, double rs = 0.0)
             : position(pos), g_cost(g), h_cost(h), f_cost(g + h),
-              parent(p), has_parent(hp), redundant_via(rv), used_redundant(ur) {}
+              parent(p), has_parent(hp), redundant_via(rv), used_redundant(ur),
+              hop_count(hc), risk_sum(rs) {}
     };
     
     // A*算法辅助函数

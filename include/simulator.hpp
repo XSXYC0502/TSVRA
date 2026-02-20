@@ -54,6 +54,8 @@ private:
     bool route_request(Request& req);
     bool reroute_request(Request& req);
     void update_tsv_occupancy(const std::vector<Point>& path, uint64_t complete_time);
+    void increment_path_usage(const std::vector<Point>& path);
+    void decrement_path_usage(const std::vector<Point>& path);
     
     // 辅助函数
     void print_progress() const;

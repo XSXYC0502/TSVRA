@@ -45,7 +45,11 @@ public:
     uint64_t get_simulation_cycles() const { return simulation_cycles_; }
     const std::string& get_output_prefix() const { return output_prefix_; }
     uint32_t get_random_seed() const { return random_seed_; }
-    
+    double get_lambda1() const { return lambda1_; }
+    double get_lambda2() const { return lambda2_; }
+    uint32_t get_max_path_length() const { return max_path_length_; }
+    double get_reliability_min() const { return reliability_min_; }
+
     // Setters
     void set_num_layers(uint32_t n) { num_layers_ = n; }
     void set_grid_factor(uint32_t n) { grid_factor_ = n; }
@@ -56,6 +60,10 @@ public:
     void set_simulation_cycles(uint64_t cycles) { simulation_cycles_ = cycles; }
     void set_output_prefix(const std::string& prefix) { output_prefix_ = prefix; }
     void set_random_seed(uint32_t seed) { random_seed_ = seed; }
+    void set_lambda1(double v) { lambda1_ = v; }
+    void set_lambda2(double v) { lambda2_ = v; }
+    void set_max_path_length(uint32_t v) { max_path_length_ = v; }
+    void set_reliability_min(double v) { reliability_min_ = v; }
     
 private:
     uint32_t num_layers_;           // 层数，默认2
@@ -67,7 +75,11 @@ private:
     uint64_t simulation_cycles_;    // 仿真周期数，默认100000
     std::string output_prefix_;     // 输出文件前缀，默认"tsvra_output"
     uint32_t random_seed_;          // 随机数种子，0表示使用随机设备
-    
+    double lambda1_;                // 拥塞权重（λ1），默认0.0
+    double lambda2_;                // 风险权重（λ2），默认0.0
+    uint32_t max_path_length_;      // 最大路径长度（L_max），0表示不限制
+    double reliability_min_;        // 最小路径可靠性（R_min），0.0表示不约束
+
     // 辅助函数
     FailureMode parse_failure_mode(const std::string& mode_str) const;
     std::string failure_mode_to_string(FailureMode mode) const;

@@ -103,6 +103,7 @@ void Simulator::process_pending_requests() {
         if (route_request(req)) {
             // 路由成功，加入传输队列
             req.status = RequestStatus::TRANSMITTING;
+            increment_path_usage(req.path);
             transmitting_requests_.push_back(req);
         } else {
             // 路由失败
@@ -194,6 +195,7 @@ void Simulator::update_transmitting_requests() {
                 req.status = RequestStatus::COMPLETED;
                 req.completed = true;
                 req.complete_time = current_cycle_;
+                decrement_path_usage(req.path);
                 stats_.record_request_completed(req);
                 it = transmitting_requests_.erase(it);
                 continue;
@@ -205,8 +207,10 @@ void Simulator::update_transmitting_requests() {
             
             if (next_tsv && next_tsv->is_failed()) {
                 // TSV失效，需要重新路由
+                decrement_path_usage(req.path);
                 if (reroute_request(req)) {
                     // 重路由成功，继续传输
+                    increment_path_usage(req.path);
                     ++it;
                 } else {
                     // 重路由失败，标记为失败
@@ -242,6 +246,24 @@ void Simulator::update_tsv_occupancy(const std::vector<Point>& path, uint64_t co
         TSV* tsv = grid_->get_tsv(point.x, point.y, point.z);
         if (tsv) {
             tsv->occupy_until(complete_time);
+        }
+    }
+}
+
+void Simulator::increment_path_usage(const std::vector<Point>& path) {
+    for (const auto& point : path) {
+        TSV* tsv = grid_->get_tsv(point.x, point.y, point.z);
+        if (tsv) {
+            tsv->increment_usage();
+        }
+    }
+}
+
+void Simulator::decrement_path_usage(const std::vector<Point>& path) {
+    for (const auto& point : path) {
+        TSV* tsv = grid_->get_tsv(point.x, point.y, point.z);
+        if (tsv) {
+            tsv->decrement_usage();
         }
     }
 }

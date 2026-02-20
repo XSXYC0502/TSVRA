@@ -16,7 +16,11 @@ Config::Config()
       horizontal_delay_(1000),
       simulation_cycles_(100000),  // 默认仿真周期
       output_prefix_("tsvra_output"),
-      random_seed_(0) {
+      random_seed_(0),
+      lambda1_(0.0),
+      lambda2_(0.0),
+      max_path_length_(0),
+      reliability_min_(0.0) {
 }
 
 bool Config::load_from_file(const std::string& filename) {
@@ -61,6 +65,14 @@ bool Config::load_from_file(const std::string& filename) {
                 random_seed_ = static_cast<uint32_t>(std::stoul(value));
             } else if (key == "simulation_cycles") {
                 simulation_cycles_ = std::stoull(value);
+            } else if (key == "lambda1") {
+                lambda1_ = std::stod(value);
+            } else if (key == "lambda2") {
+                lambda2_ = std::stod(value);
+            } else if (key == "max_path_length") {
+                max_path_length_ = static_cast<uint32_t>(std::stoul(value));
+            } else if (key == "reliability_min") {
+                reliability_min_ = std::stod(value);
             }
         }
     }
@@ -86,6 +98,10 @@ bool Config::parse_command_line(int argc, char* argv[]) {
                       << "  --cycles <n>              仿真周期数 (默认: 100000)\n"
                       << "  --output <prefix>         输出文件前缀 (默认: tsvra_output)\n"
                       << "  --seed <n>                随机数种子 (默认: 0=随机)\n"
+                      << "  --lambda1 <v>             拥塞权重λ1 (默认: 0.0=禁用)\n"
+                      << "  --lambda2 <v>             风险权重λ2 (默认: 0.0=禁用)\n"
+                      << "  --max-path-length <n>     最大路径跳数L_max (默认: 0=不限制)\n"
+                      << "  --reliability-min <v>     最小路径可靠性R_min (默认: 0.0=不约束)\n"
                       << "  -h, --help                显示帮助信息\n";
             return false;
         } else if (arg == "--config" && i + 1 < argc) {
@@ -108,6 +124,14 @@ bool Config::parse_command_line(int argc, char* argv[]) {
             output_prefix_ = argv[++i];
         } else if (arg == "--seed" && i + 1 < argc) {
             random_seed_ = static_cast<uint32_t>(std::stoul(argv[++i]));
+        } else if (arg == "--lambda1" && i + 1 < argc) {
+            lambda1_ = std::stod(argv[++i]);
+        } else if (arg == "--lambda2" && i + 1 < argc) {
+            lambda2_ = std::stod(argv[++i]);
+        } else if (arg == "--max-path-length" && i + 1 < argc) {
+            max_path_length_ = static_cast<uint32_t>(std::stoul(argv[++i]));
+        } else if (arg == "--reliability-min" && i + 1 < argc) {
+            reliability_min_ = std::stod(argv[++i]);
         }
     }
     
@@ -139,7 +163,22 @@ bool Config::validate() const {
         std::cerr << "错误: 仿真周期数必须大于0" << std::endl;
         return false;
     }
-    
+
+    if (lambda1_ < 0.0) {
+        std::cerr << "错误: 拥塞权重λ1不能为负数" << std::endl;
+        return false;
+    }
+
+    if (lambda2_ < 0.0) {
+        std::cerr << "错误: 风险权重λ2不能为负数" << std::endl;
+        return false;
+    }
+
+    if (reliability_min_ < 0.0 || reliability_min_ > 1.0) {
+        std::cerr << "错误: 最小可靠性R_min必须在0到1之间" << std::endl;
+        return false;
+    }
+
     return true;
 }
 
@@ -154,6 +193,10 @@ void Config::print() const {
               << "仿真周期: " << simulation_cycles_ << "\n"
               << "输出前缀: " << output_prefix_ << "\n"
               << "随机种子: " << (random_seed_ == 0 ? "随机" : std::to_string(random_seed_)) << "\n"
+              << "拥塞权重λ1: " << lambda1_ << (lambda1_ == 0.0 ? " (禁用)" : "") << "\n"
+              << "风险权重λ2: " << lambda2_ << (lambda2_ == 0.0 ? " (禁用)" : "") << "\n"
+              << "最大路径长度L_max: " << (max_path_length_ == 0 ? "不限制" : std::to_string(max_path_length_)) << "\n"
+              << "最小可靠性R_min: " << reliability_min_ << (reliability_min_ == 0.0 ? " (不约束)" : "") << "\n"
               << "==================\n";
 }
 

@@ -3,6 +3,7 @@
 #include <unordered_set>
 #include <cmath>
 #include <algorithm>
+#include <limits>
 
 namespace tsvra {
 
@@ -31,6 +32,22 @@ std::optional<std::pair<std::vector<Point>, uint64_t>> Router::route(
     // A*算法实现
     uint32_t grid_size = grid_.get_grid_size();
     uint32_t num_layers = grid_.get_num_layers();
+
+    // 预计算动态代价参数
+    const double lambda1 = config_.get_lambda1();
+    const double lambda2 = config_.get_lambda2();
+    const double failure_rate = config_.get_failure_rate();
+    const uint32_t max_path_length = config_.get_max_path_length();
+    const double reliability_min = config_.get_reliability_min();
+
+    // φ(pfail) = -ln(1 - pfail)，单节点风险惩罚
+    const double phi_fail = (failure_rate < 1.0) ? -std::log(1.0 - failure_rate) : 1e18;
+
+    // R_min约束：∑ φ(pfail) ≤ -ln(R_min) 即 max_risk
+    const bool reliability_active = (reliability_min > 0.0);
+    const double max_risk = reliability_active
+        ? ((reliability_min < 1.0) ? -std::log(reliability_min) : 0.0)
+        : std::numeric_limits<double>::max();
     
     // 初始化节点网格
     std::vector<std::vector<std::vector<AStarNode>>> nodes(
@@ -52,7 +69,7 @@ std::optional<std::pair<std::vector<Point>, uint64_t>> Router::route(
     
     // 初始化起始节点
     double h_start = heuristic_(start, end);
-    AStarNode start_node(start, 0.0, h_start, Point(), false, Point(), false);
+    AStarNode start_node(start, 0.0, h_start, Point(), false, Point(), false, 0, 0.0);
     open_set.push(start_node);
     nodes[static_cast<size_t>(start.z)][static_cast<size_t>(start.y)][static_cast<size_t>(start.x)] = start_node;
     
@@ -121,7 +138,23 @@ std::optional<std::pair<std::vector<Point>, uint64_t>> Router::route(
                 if (redundant_tsv->get_available_at() > current_time) {
                     wait_time = static_cast<double>(redundant_tsv->get_available_at() - current_time);
                 }
-                double move_cost = cost_to_redundant + cost_from_redundant + wait_time;
+
+                // L_max约束：绕行经过2个节点（冗余TSV + 目标邻居）
+                uint32_t new_hop_count = current.hop_count + 2;
+                if (max_path_length > 0 && new_hop_count > max_path_length) {
+                    continue;
+                }
+
+                // R_min约束：2个节点的累积风险
+                double new_risk_sum = current.risk_sum + 2.0 * phi_fail;
+                if (new_risk_sum > max_risk) {
+                    continue;
+                }
+
+                // 动态代价：c0 + wait + λ1*congestion + λ2*φ(pfail)
+                double congestion_cost = lambda1 * static_cast<double>(redundant_tsv->get_usage_count());
+                double risk_cost = lambda2 * 2.0 * phi_fail;
+                double move_cost = cost_to_redundant + cost_from_redundant + wait_time + congestion_cost + risk_cost;
                 double new_g_cost = current.g_cost + move_cost;
                 double h_cost = heuristic_(neighbor, end);
                 
@@ -131,7 +164,8 @@ std::optional<std::pair<std::vector<Point>, uint64_t>> Router::route(
                                                [static_cast<size_t>(neighbor.x)];
                 
                 if (!neighbor_node.has_parent || new_g_cost < neighbor_node.g_cost) {
-                    neighbor_node = AStarNode(neighbor, new_g_cost, h_cost, current.position, true, redundant_pos, true);
+                    neighbor_node = AStarNode(neighbor, new_g_cost, h_cost, current.position, true,
+                                              redundant_pos, true, new_hop_count, new_risk_sum);
                     open_set.push(neighbor_node);
                 }
                 continue;
@@ -143,10 +177,25 @@ std::optional<std::pair<std::vector<Point>, uint64_t>> Router::route(
                 // TSV被占用，需要等待
                 actual_arrival_time = tsv->get_available_at();
             }
-            
+
+            // L_max约束
+            uint32_t new_hop_count = current.hop_count + 1;
+            if (max_path_length > 0 && new_hop_count > max_path_length) {
+                continue;
+            }
+
+            // R_min约束
+            double new_risk_sum = current.risk_sum + phi_fail;
+            if (new_risk_sum > max_risk) {
+                continue;
+            }
+
+            // 动态代价：c0 + wait + λ1*congestion + λ2*φ(pfail)
             double move_cost = calculate_move_cost(current.position, neighbor);
             double wait_cost = static_cast<double>(actual_arrival_time - current_time);
-            double new_g_cost = current.g_cost + move_cost + wait_cost;
+            double congestion_cost = lambda1 * static_cast<double>(tsv->get_usage_count());
+            double risk_cost = lambda2 * phi_fail;
+            double new_g_cost = current.g_cost + move_cost + wait_cost + congestion_cost + risk_cost;
             double h_cost = heuristic_(neighbor, end);
             
             AStarNode& neighbor_node = nodes[static_cast<size_t>(neighbor.z)]
@@ -155,7 +204,8 @@ std::optional<std::pair<std::vector<Point>, uint64_t>> Router::route(
             
             // 如果找到更好的路径，或者这是第一次访问
             if (!neighbor_node.has_parent || new_g_cost < neighbor_node.g_cost) {
-                neighbor_node = AStarNode(neighbor, new_g_cost, h_cost, current.position, true);
+                neighbor_node = AStarNode(neighbor, new_g_cost, h_cost, current.position, true,
+                                          Point(), false, new_hop_count, new_risk_sum);
                 open_set.push(neighbor_node);
             }
         }
