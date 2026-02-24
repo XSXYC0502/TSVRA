@@ -1,9 +1,9 @@
 import { ChildProcess, spawn } from 'child_process';
 import { createInterface } from 'readline';
 import path from 'path';
-import { fileURLToPath } from 'url';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+// In Nitro, __dirname points to compiled output. Use process.cwd() which is the project root.
+const binPath = path.resolve(process.cwd(), '../bin/tsvra');
 
 export type SimConfig = {
   numLayers: number;
@@ -35,8 +35,6 @@ export class SimulationManager {
     if (this.process) {
       this.kill();
     }
-
-    const binPath = path.resolve(__dirname, '../../bin/tsvra');
 
     const args = [
       '--json-stream',

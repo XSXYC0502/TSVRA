@@ -1,23 +1,30 @@
 <script setup lang="ts">
-import { computed, watchEffect, ref } from 'vue';
+import { computed, watchEffect, ref, onMounted, onBeforeUnmount, watch } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useSimulationStore } from '~/stores/simulation';
 import { viridis } from '~/utils/colorScales';
 import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
 const store = useSimulationStore();
 const { tsvGrid, config, activeRequests, hotspotWeights } = storeToRefs(store);
 
-const heatmapMeshRef = ref<THREE.InstancedMesh | null>(null);
-const regionLinesGeom = ref<THREE.BufferGeometry | null>(null);
+const canvasContainer = ref<HTMLDivElement | null>(null);
+let renderer: THREE.WebGLRenderer | null = null;
+let scene: THREE.Scene | null = null;
+let camera: THREE.PerspectiveCamera | null = null;
+let controls: OrbitControls | null = null;
+let animationId = 0;
+let resizeObserver: ResizeObserver | null = null;
 
-const gridSize = computed(() => config.value?.gridSize ?? 0);
-const cameraHeight = computed(() => gridSize.value * 1.4);
-const cameraPosition = computed(() => [0, cameraHeight.value, cameraHeight.value * 0.01] as [number, number, number]);
-const instanceCount = computed(() => gridSize.value * gridSize.value);
+let heatmapMesh: THREE.InstancedMesh | null = null;
+let regionLines: THREE.LineSegments | null = null;
 
 const dummy = new THREE.Object3D();
 const tempColor = new THREE.Color();
+
+const gridSize = computed(() => config.value?.gridSize ?? 0);
+const instanceCount = computed(() => gridSize.value * gridSize.value);
 
 // Compute traffic map
 const trafficData = computed(() => {
@@ -79,10 +86,92 @@ const trafficData = computed(() => {
   return { trafficMap: map, maxTraffic: max };
 });
 
-// Update instanced mesh
-watchEffect(() => {
-  const mesh = heatmapMeshRef.value;
-  if (!mesh || !config.value) return;
+function buildScene() {
+  if (!canvasContainer.value || !config.value) return;
+  const el = canvasContainer.value;
+
+  // Clean up previous scene if any
+  disposeScene();
+
+  const size = gridSize.value;
+
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color('#1a1a2e');
+
+  const cameraHeight = size * 1.4;
+  camera = new THREE.PerspectiveCamera(50, el.clientWidth / el.clientHeight, 0.1, 1000);
+  camera.position.set(0, cameraHeight, cameraHeight * 0.01);
+
+  renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setSize(el.clientWidth, el.clientHeight);
+  renderer.setPixelRatio(window.devicePixelRatio);
+  renderer.toneMapping = THREE.NoToneMapping;
+  el.appendChild(renderer.domElement);
+
+  controls = new OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true;
+  controls.dampingFactor = 0.1;
+  controls.update();
+
+  // Create heatmap instanced mesh
+  const boxGeom = new THREE.BoxGeometry(1, 1, 1);
+  const basicMat = new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: false });
+  heatmapMesh = new THREE.InstancedMesh(boxGeom, basicMat, instanceCount.value);
+  scene.add(heatmapMesh);
+
+  // Region lines
+  const linesGeom = new THREE.BufferGeometry();
+  const linesMat = new THREE.LineBasicMaterial({ color: '#aaaaaa', transparent: true, opacity: 0.4 });
+  regionLines = new THREE.LineSegments(linesGeom, linesMat);
+  scene.add(regionLines);
+
+  // Initial updates
+  updateRegionLines();
+  updateHeatmapMesh();
+
+  // Animation loop
+  function animate() {
+    animationId = requestAnimationFrame(animate);
+    controls!.update();
+    renderer!.render(scene!, camera!);
+  }
+  animate();
+
+  // Handle resize
+  resizeObserver = new ResizeObserver(() => {
+    if (!camera || !renderer) return;
+    const w = el.clientWidth;
+    const h = el.clientHeight;
+    if (w === 0 || h === 0) return;
+    camera.aspect = w / h;
+    camera.updateProjectionMatrix();
+    renderer.setSize(w, h);
+  });
+  resizeObserver.observe(el);
+}
+
+function updateRegionLines() {
+  if (!regionLines) return;
+  const size = gridSize.value;
+  if (size === 0) return;
+
+  const pts: number[] = [];
+  const half = size / 2;
+  const numRegions = size / 4;
+  for (let i = 0; i <= numRegions; i++) {
+    const pos = i * 4 - half;
+    pts.push(-half, 0.1, pos, half, 0.1, pos);
+    pts.push(pos, 0.1, -half, pos, 0.1, half);
+  }
+
+  regionLines.geometry.dispose();
+  const geom = new THREE.BufferGeometry();
+  geom.setAttribute('position', new THREE.BufferAttribute(new Float32Array(pts), 3));
+  regionLines.geometry = geom;
+}
+
+function updateHeatmapMesh() {
+  if (!heatmapMesh || !config.value) return;
 
   const size = gridSize.value;
   const half = size / 2;
@@ -95,39 +184,79 @@ watchEffect(() => {
       dummy.position.set(x - half + 0.5, 0, y - half + 0.5);
       dummy.scale.set(0.95, 0.1, 0.95);
       dummy.updateMatrix();
-      mesh.setMatrixAt(i, dummy.matrix);
+      heatmapMesh.setMatrixAt(i, dummy.matrix);
 
       const t = maxTraffic > 0 ? trafficMap[y][x] / maxTraffic : 0;
       const [r, g, b] = viridis(t);
       tempColor.setRGB(r, g, b);
-      mesh.setColorAt(i, tempColor);
+      heatmapMesh.setColorAt(i, tempColor);
       i++;
     }
   }
-  mesh.instanceMatrix.needsUpdate = true;
-  if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
-});
+  heatmapMesh.instanceMatrix.needsUpdate = true;
+  if (heatmapMesh.instanceColor) heatmapMesh.instanceColor.needsUpdate = true;
+}
 
-// Region lines
-const regionLinesPoints = computed(() => {
-  const size = gridSize.value;
-  if (size === 0) return new Float32Array(0);
-  const pts: number[] = [];
-  const half = size / 2;
-  const numRegions = size / 4;
-  for (let i = 0; i <= numRegions; i++) {
-    const pos = i * 4 - half;
-    pts.push(-half, 0.1, pos, half, 0.1, pos);
-    pts.push(pos, 0.1, -half, pos, 0.1, half);
+function disposeScene() {
+  cancelAnimationFrame(animationId);
+  animationId = 0;
+  if (resizeObserver) {
+    resizeObserver.disconnect();
+    resizeObserver = null;
   }
-  return new Float32Array(pts);
+
+  if (heatmapMesh) {
+    heatmapMesh.geometry.dispose();
+    (heatmapMesh.material as THREE.Material).dispose();
+    scene?.remove(heatmapMesh);
+    heatmapMesh = null;
+  }
+
+  if (regionLines) {
+    regionLines.geometry.dispose();
+    (regionLines.material as THREE.Material).dispose();
+    scene?.remove(regionLines);
+    regionLines = null;
+  }
+
+  controls?.dispose();
+  controls = null;
+
+  if (renderer) {
+    renderer.dispose();
+    renderer.domElement.remove();
+    renderer = null;
+  }
+
+  scene = null;
+  camera = null;
+}
+
+onMounted(() => {
+  if (config.value && tsvGrid.value) {
+    buildScene();
+  }
 });
 
+onBeforeUnmount(() => {
+  disposeScene();
+});
+
+// Rebuild scene when config changes (different grid size)
+watch([config], () => {
+  if (config.value && tsvGrid.value && canvasContainer.value) {
+    buildScene();
+  }
+});
+
+// Update heatmap colors reactively
 watchEffect(() => {
-  if (!regionLinesGeom.value) return;
-  const pts = regionLinesPoints.value;
-  if (pts.length > 0) {
-    regionLinesGeom.value.setAttribute('position', new THREE.BufferAttribute(pts, 3));
+  // Track dependencies
+  const _td = trafficData.value;
+  const _grid = tsvGrid.value;
+
+  if (scene && heatmapMesh) {
+    updateHeatmapMesh();
   }
 });
 </script>
@@ -137,26 +266,7 @@ watchEffect(() => {
     Start a simulation to see the heatmap
   </div>
   <div v-else class="absolute inset-0">
-    <TresCanvas flat :camera="{ position: cameraPosition, fov: 50 }">
-      <TresScene>
-        <TresColor attach="background" :args="['#1a1a2e']" />
-
-        <TresInstancedMesh
-          ref="heatmapMeshRef"
-          :args="[undefined, undefined, instanceCount]"
-        >
-          <TresBoxGeometry :args="[1, 1, 1]" />
-          <TresMeshBasicMaterial vertex-colors :tone-mapped="false" />
-        </TresInstancedMesh>
-
-        <TresLineSegments>
-          <TresBufferGeometry ref="regionLinesGeom" />
-          <TresLineBasicMaterial color="#aaaaaa" :transparent="true" :opacity="0.4" />
-        </TresLineSegments>
-
-        <OrbitControls :enable-damping="true" :damping-factor="0.1" />
-      </TresScene>
-    </TresCanvas>
+    <div ref="canvasContainer" class="absolute inset-0" />
 
     <div class="absolute bottom-3 left-3 bg-gray-900/90 rounded p-2 text-xs">
       <div class="mb-1 text-gray-400">Traffic Density</div>

@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, watchEffect, ref } from 'vue';
+import { computed, watchEffect, ref, onMounted, onBeforeUnmount, watch } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useSimulationStore } from '~/stores/simulation';
 import { formatNumber } from '~/utils/formatters';
 import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import type { TSVState, SimConfig, FailureEvent } from '~/types/simulation';
 import {
   Chart as ChartJS,
@@ -24,49 +25,19 @@ const store = useSimulationStore();
 const { tsvGrid, config, failureTimeline, failedTSVPositions } = storeToRefs(store);
 
 const layerSpacing = 3;
-const failureMeshRef = ref<THREE.InstancedMesh | null>(null);
+
+// 3D failure map
+const canvasContainer = ref<HTMLDivElement | null>(null);
+let renderer: THREE.WebGLRenderer | null = null;
+let scene: THREE.Scene | null = null;
+let camera: THREE.PerspectiveCamera | null = null;
+let controls: OrbitControls | null = null;
+let animationId = 0;
+let resizeObserver: ResizeObserver | null = null;
+let failureMesh: THREE.InstancedMesh | null = null;
 
 const dummy = new THREE.Object3D();
 const tempColor = new THREE.Color();
-
-// Update failure grid instanced mesh
-watchEffect(() => {
-  const mesh = failureMeshRef.value;
-  if (!mesh || !tsvGrid.value || !config.value) return;
-
-  const size = config.value.gridSize;
-  const layers = config.value.numLayers;
-  const half = size / 2;
-  const grid = tsvGrid.value;
-
-  let i = 0;
-  for (let z = 0; z < layers; z++) {
-    for (let y = 0; y < size; y++) {
-      for (let x = 0; x < size; x++) {
-        const tsv = grid[z]?.[y]?.[x];
-        if (!tsv) { i++; continue; }
-        dummy.position.set(x - half + 0.5, z * layerSpacing, y - half + 0.5);
-        dummy.scale.set(0.8, 0.3, 0.8);
-        dummy.updateMatrix();
-        mesh.setMatrixAt(i, dummy.matrix);
-
-        if (tsv.failed) {
-          tempColor.setRGB(
-            tsv.redundant ? 1 : 1,
-            tsv.redundant ? 0.5 : 0.15,
-            tsv.redundant ? 0 : 0.15
-          );
-        } else {
-          tempColor.setRGB(0.15, 0.15, 0.2);
-        }
-        mesh.setColorAt(i, tempColor);
-        i++;
-      }
-    }
-  }
-  mesh.instanceMatrix.needsUpdate = true;
-  if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
-});
 
 const totalInstances = computed(() => {
   if (!config.value) return 0;
@@ -195,6 +166,164 @@ const redundancyChartOptions = {
     },
   },
 };
+
+// --- 3D failure map logic ---
+
+function buildScene() {
+  if (!canvasContainer.value || !config.value || !tsvGrid.value) return;
+  const el = canvasContainer.value;
+
+  // Clean up previous scene if any
+  disposeScene();
+
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color('#1a1a2e');
+
+  camera = new THREE.PerspectiveCamera(50, el.clientWidth / el.clientHeight, 0.1, 1000);
+  camera.position.set(15, 15, 15);
+
+  renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setSize(el.clientWidth, el.clientHeight);
+  renderer.setPixelRatio(window.devicePixelRatio);
+  el.appendChild(renderer.domElement);
+
+  controls = new OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true;
+  controls.dampingFactor = 0.1;
+  controls.update();
+
+  // Lights
+  const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
+  scene.add(ambientLight);
+  const dirLight = new THREE.DirectionalLight(0xffffff, 0.6);
+  dirLight.position.set(10, 20, 10);
+  scene.add(dirLight);
+
+  // Create instanced mesh for failure grid
+  const total = totalInstances.value;
+  if (total > 0) {
+    const boxGeom = new THREE.BoxGeometry(1, 1, 1);
+    const stdMat = new THREE.MeshStandardMaterial({ vertexColors: true, toneMapped: false });
+    failureMesh = new THREE.InstancedMesh(boxGeom, stdMat, total);
+    scene.add(failureMesh);
+  }
+
+  // Initial update
+  updateFailureMesh();
+
+  // Animation loop
+  function animate() {
+    animationId = requestAnimationFrame(animate);
+    controls!.update();
+    renderer!.render(scene!, camera!);
+  }
+  animate();
+
+  // Handle resize
+  resizeObserver = new ResizeObserver(() => {
+    if (!camera || !renderer) return;
+    const w = el.clientWidth;
+    const h = el.clientHeight;
+    if (w === 0 || h === 0) return;
+    camera.aspect = w / h;
+    camera.updateProjectionMatrix();
+    renderer.setSize(w, h);
+  });
+  resizeObserver.observe(el);
+}
+
+function updateFailureMesh() {
+  if (!failureMesh || !tsvGrid.value || !config.value) return;
+
+  const size = config.value.gridSize;
+  const layers = config.value.numLayers;
+  const half = size / 2;
+  const grid = tsvGrid.value;
+
+  let i = 0;
+  for (let z = 0; z < layers; z++) {
+    for (let y = 0; y < size; y++) {
+      for (let x = 0; x < size; x++) {
+        const tsv = grid[z]?.[y]?.[x];
+        if (!tsv) { i++; continue; }
+        dummy.position.set(x - half + 0.5, z * layerSpacing, y - half + 0.5);
+        dummy.scale.set(0.8, 0.3, 0.8);
+        dummy.updateMatrix();
+        failureMesh.setMatrixAt(i, dummy.matrix);
+
+        if (tsv.failed) {
+          tempColor.setRGB(
+            tsv.redundant ? 1 : 1,
+            tsv.redundant ? 0.5 : 0.15,
+            tsv.redundant ? 0 : 0.15
+          );
+        } else {
+          tempColor.setRGB(0.15, 0.15, 0.2);
+        }
+        failureMesh.setColorAt(i, tempColor);
+        i++;
+      }
+    }
+  }
+  failureMesh.instanceMatrix.needsUpdate = true;
+  if (failureMesh.instanceColor) failureMesh.instanceColor.needsUpdate = true;
+}
+
+function disposeScene() {
+  cancelAnimationFrame(animationId);
+  animationId = 0;
+  if (resizeObserver) {
+    resizeObserver.disconnect();
+    resizeObserver = null;
+  }
+
+  if (failureMesh) {
+    failureMesh.geometry.dispose();
+    (failureMesh.material as THREE.Material).dispose();
+    scene?.remove(failureMesh);
+    failureMesh = null;
+  }
+
+  controls?.dispose();
+  controls = null;
+
+  if (renderer) {
+    renderer.dispose();
+    renderer.domElement.remove();
+    renderer = null;
+  }
+
+  scene = null;
+  camera = null;
+}
+
+onMounted(() => {
+  if (config.value && tsvGrid.value) {
+    buildScene();
+  }
+});
+
+onBeforeUnmount(() => {
+  disposeScene();
+});
+
+// Rebuild scene when config changes
+watch([config], () => {
+  if (config.value && tsvGrid.value && canvasContainer.value) {
+    buildScene();
+  }
+});
+
+// Update failure mesh colors reactively
+watchEffect(() => {
+  // Track dependencies
+  const _grid = tsvGrid.value;
+  const _positions = failedTSVPositions.value;
+
+  if (scene && failureMesh) {
+    updateFailureMesh();
+  }
+});
 </script>
 
 <template>
@@ -207,24 +336,7 @@ const redundancyChartOptions = {
       <div class="px-3 py-2 text-sm font-medium text-gray-300 border-b border-gray-700/30 relative z-10">
         Failure Map ({{ failedTSVPositions.length }} failed TSVs)
       </div>
-      <div class="absolute inset-0 top-8">
-        <TresCanvas :camera="{ position: [15, 15, 15], fov: 50 }">
-          <TresScene>
-            <TresAmbientLight :intensity="0.4" />
-            <TresDirectionalLight :position="[10, 20, 10]" :intensity="0.6" />
-
-            <TresInstancedMesh
-              ref="failureMeshRef"
-              :args="[undefined, undefined, totalInstances]"
-            >
-              <TresBoxGeometry :args="[1, 1, 1]" />
-              <TresMeshStandardMaterial vertex-colors :tone-mapped="false" />
-            </TresInstancedMesh>
-
-            <OrbitControls :enable-damping="true" :damping-factor="0.1" />
-          </TresScene>
-        </TresCanvas>
-      </div>
+      <div ref="canvasContainer" class="absolute inset-0 top-8" />
     </div>
 
     <!-- Failure Timeline -->
