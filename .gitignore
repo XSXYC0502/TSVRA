@@ -43,3 +43,7 @@
 bin/
 build/
 *.csv
+
+node_modules
+.nuxt
+.output
