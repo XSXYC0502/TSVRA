@@ -9,16 +9,17 @@
     "preview": "nuxt preview"
   },
   "dependencies": {
-    "nuxt": "^3.16.0",
-    "@tresjs/nuxt": "^4.0.0",
-    "@tresjs/cientos": "^4.1.0",
-    "three": "^0.183.1",
-    "@pinia/nuxt": "^0.9.0",
-    "pinia": "^3.0.0",
+    "@pinia/nuxt": "^0.11.3",
+    "@tailwindcss/postcss": "^4.2.1",
+    "@tailwindcss/vite": "^4.2.1",
+    "@tresjs/cientos": "^5.4.0",
+    "@tresjs/nuxt": "^5.3.0",
     "chart.js": "^4.4.0",
-    "vue-chartjs": "^5.3.0",
-    "@tailwindcss/nuxt": "^0.1.0",
-    "tailwindcss": "^4.2.0"
+    "nuxt": "^4.3.1",
+    "pinia": "^3.0.4",
+    "tailwindcss": "^4.2.0",
+    "three": "^0.183.1",
+    "vue-chartjs": "^5.3.0"
   },
   "devDependencies": {
     "@types/three": "^0.183.0",
