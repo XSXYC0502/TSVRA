@@ -1,9 +1,23 @@
 import { ChildProcess, spawn } from 'child_process';
 import { createInterface } from 'readline';
 import path from 'path';
+import fs from 'fs';
+import { fileURLToPath } from 'url';
 
-// In Nitro, __dirname points to compiled output. Use process.cwd() which is the project root.
-const binPath = path.resolve(process.cwd(), '../bin/tsvra');
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+function resolveBinPath(): string {
+  const candidates = [
+    path.resolve(__dirname, '../../../bin/tsvra'),   // from server/utils/ → project root
+    path.resolve(process.cwd(), '../bin/tsvra'),      // if cwd is web-nuxt/
+    path.resolve(process.cwd(), 'bin/tsvra'),         // if cwd is visual-web/
+  ];
+  for (const p of candidates) {
+    if (fs.existsSync(p)) return p;
+  }
+  throw new Error(`tsvra binary not found. Searched:\n${candidates.join('\n')}`);
+}
 
 export type SimConfig = {
   numLayers: number;
@@ -13,7 +27,6 @@ export type SimConfig = {
   verticalDelay: number;
   horizontalDelay: number;
   cycles: number;
-  batchSize: number;
   seed?: number;
   lambda1?: number;
   lambda2?: number;
@@ -25,15 +38,32 @@ export class SimulationManager {
   private process: ChildProcess | null = null;
   private onMessage: (msg: unknown) => void;
   private onExit: (code: number | null) => void;
+  private onError: (err: Error) => void;
+  private onStderr: (line: string) => void;
 
-  constructor(onMessage: (msg: unknown) => void, onExit: (code: number | null) => void) {
+  constructor(
+    onMessage: (msg: unknown) => void,
+    onExit: (code: number | null) => void,
+    onError: (err: Error) => void,
+    onStderr: (line: string) => void,
+  ) {
     this.onMessage = onMessage;
     this.onExit = onExit;
+    this.onError = onError;
+    this.onStderr = onStderr;
   }
 
   start(config: SimConfig): void {
     if (this.process) {
       this.kill();
+    }
+
+    let binPath: string;
+    try {
+      binPath = resolveBinPath();
+    } catch (err) {
+      this.onError(err as Error);
+      return;
     }
 
     const args = [
@@ -45,7 +75,6 @@ export class SimulationManager {
       '--vertical-delay', String(config.verticalDelay),
       '--horizontal-delay', String(config.horizontalDelay),
       '--cycles', String(config.cycles),
-      '--batch-size', String(config.batchSize),
     ];
 
     if (config.seed !== undefined) args.push('--seed', String(config.seed));
@@ -53,6 +82,8 @@ export class SimulationManager {
     if (config.lambda2 !== undefined) args.push('--lambda2', String(config.lambda2));
     if (config.maxPathLength !== undefined) args.push('--max-path-length', String(config.maxPathLength));
     if (config.reliabilityMin !== undefined) args.push('--reliability-min', String(config.reliabilityMin));
+
+    console.log(`[SimulationManager] Spawning: ${binPath} ${args.join(' ')}`);
 
     this.process = spawn(binPath, args, {
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -65,21 +96,37 @@ export class SimulationManager {
         this.onMessage(msg);
       } catch {
         console.error('Failed to parse JSON from C++:', line);
+        this.onError(new Error(`Invalid JSON from C++ process: ${line.slice(0, 200)}`));
       }
     });
 
     this.process.stderr?.on('data', (data: Buffer) => {
-      console.error('[C++]', data.toString());
+      const text = data.toString();
+      console.error('[C++]', text);
+      this.onStderr(text);
     });
 
     this.process.on('error', (err: NodeJS.ErrnoException) => {
       console.error('Simulator process error:', err.message);
+      this.onError(new Error(
+        err.code === 'ENOENT'
+          ? `Binary not found at: ${binPath}`
+          : `Spawn failed: ${err.message}`
+      ));
     });
 
-    this.process.on('exit', (code) => {
+    this.process.on('exit', (code: number | null) => {
       this.onExit(code);
       this.process = null;
     });
+  }
+
+  getBinPath(): string | null {
+    try {
+      return resolveBinPath();
+    } catch {
+      return null;
+    }
   }
 
   sendCommand(cmd: string): void {

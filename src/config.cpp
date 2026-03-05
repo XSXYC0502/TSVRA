@@ -20,7 +20,8 @@ Config::Config()
       lambda1_(0.0),
       lambda2_(0.0),
       max_path_length_(0),
-      reliability_min_(0.0) {
+      reliability_min_(0.0),
+      json_stream_(false) {
 }
 
 bool Config::load_from_file(const std::string& filename) {
@@ -102,6 +103,7 @@ bool Config::parse_command_line(int argc, char* argv[]) {
                       << "  --lambda2 <v>             风险权重λ2 (默认: 0.0=禁用)\n"
                       << "  --max-path-length <n>     最大路径跳数L_max (默认: 0=不限制)\n"
                       << "  --reliability-min <v>     最小路径可靠性R_min (默认: 0.0=不约束)\n"
+                      << "  --json-stream             启用JSON流式输出模式\n"
                       << "  -h, --help                显示帮助信息\n";
             return false;
         } else if (arg == "--config" && i + 1 < argc) {
@@ -132,6 +134,8 @@ bool Config::parse_command_line(int argc, char* argv[]) {
             max_path_length_ = static_cast<uint32_t>(std::stoul(argv[++i]));
         } else if (arg == "--reliability-min" && i + 1 < argc) {
             reliability_min_ = std::stod(argv[++i]);
+        } else if (arg == "--json-stream") {
+            json_stream_ = true;
         }
     }
     

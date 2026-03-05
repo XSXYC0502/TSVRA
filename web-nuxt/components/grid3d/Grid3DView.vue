@@ -1,14 +1,15 @@
 <script setup lang="ts">
-import { ref, computed, watchEffect, onMounted, onBeforeUnmount, watch } from 'vue';
+import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useSimulationStore } from '~/stores/simulation';
 import { useColorScale } from '~/composables/useColorScale';
+import { scheduleBuild } from '~/composables/useBuildQueue';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import type { ColorMode } from '~/types/simulation';
 
 const store = useSimulationStore();
-const { tsvGrid, config, colorMode, activeRequests } = storeToRefs(store);
+const { tsvGrid, config, colorMode, activeRequests, activeView, cumulativeTraffic } = storeToRefs(store);
 
 const layerSpacing = 3;
 
@@ -33,6 +34,9 @@ const tempColor = new THREE.Color();
 const gridSize = computed(() => config.value?.gridSize ?? 0);
 const numLayers = computed(() => config.value?.numLayers ?? 0);
 const centerY = computed(() => ((numLayers.value - 1) * layerSpacing) / 2);
+
+// Visibility: pause animation when not visible
+const isVisible = computed(() => activeView.value === 'grid3d' || activeView.value === 'quad');
 
 // Compute traffic map from active requests
 const trafficMap = computed(() => {
@@ -70,6 +74,12 @@ const requestPathLines = computed(() => {
 function buildScene() {
   if (!canvasContainer.value || !config.value) return;
   const el = canvasContainer.value;
+
+  // Retry via rAF if container has zero dimensions (just transitioned from display:none)
+  if (el.clientWidth === 0 || el.clientHeight === 0) {
+    requestAnimationFrame(() => buildScene());
+    return;
+  }
 
   // Clean up previous scene if any
   disposeScene();
@@ -135,13 +145,8 @@ function buildScene() {
   updateLayerMeshes();
   updatePaths();
 
-  // Animation loop
-  function animate() {
-    animationId = requestAnimationFrame(animate);
-    controls!.update();
-    renderer!.render(scene!, camera!);
-  }
-  animate();
+  // Start animation loop
+  startAnimation();
 
   // Handle resize
   resizeObserver = new ResizeObserver(() => {
@@ -154,6 +159,25 @@ function buildScene() {
     renderer.setSize(w, h);
   });
   resizeObserver.observe(el);
+}
+
+function startAnimation() {
+  if (animationId) return;
+  function animate() {
+    animationId = requestAnimationFrame(animate);
+    controls?.update();
+    if (renderer && scene && camera) {
+      renderer.render(scene, camera);
+    }
+  }
+  animate();
+}
+
+function stopAnimation() {
+  if (animationId) {
+    cancelAnimationFrame(animationId);
+    animationId = 0;
+  }
 }
 
 function updateGridFrame() {
@@ -236,8 +260,7 @@ function updatePaths() {
 }
 
 function disposeScene() {
-  cancelAnimationFrame(animationId);
-  animationId = 0;
+  stopAnimation();
   if (resizeObserver) {
     resizeObserver.disconnect();
     resizeObserver = null;
@@ -285,7 +308,7 @@ function disposeScene() {
 }
 
 onMounted(() => {
-  if (config.value && tsvGrid.value) {
+  if (isVisible.value && config.value && tsvGrid.value) {
     buildScene();
   }
 });
@@ -296,30 +319,52 @@ onBeforeUnmount(() => {
 
 // Rebuild scene when config changes (different grid size / layers)
 watch([config], () => {
-  if (config.value && tsvGrid.value && canvasContainer.value) {
+  if (isVisible.value && config.value && tsvGrid.value && canvasContainer.value) {
     buildScene();
   }
 });
 
-// Update colors/positions reactively when data changes
-watchEffect(() => {
-  // Track dependencies
-  const _grid = tsvGrid.value;
-  const _cm = colorMode.value;
-  const _tm = trafficMap.value;
+// Handle view switching: build scene on first show, pause/resume animation
+// flush: 'post' ensures DOM is updated (v-show applied) before we check dimensions
+watch(
+  () => store.activeView,
+  () => {
+    if (isVisible.value) {
+      if (!scene && config.value && tsvGrid.value) {
+        // buildScene will retry via rAF if container dimensions are zero
+        scheduleBuild(() => buildScene());
+      } else if (scene) {
+        startAnimation();
+        const el = canvasContainer.value;
+        if (renderer && camera && el && el.clientWidth > 0) {
+          camera.aspect = el.clientWidth / el.clientHeight;
+          camera.updateProjectionMatrix();
+          renderer.setSize(el.clientWidth, el.clientHeight);
+        }
+      }
+    } else {
+      stopAnimation();
+    }
+  },
+  { flush: 'post' }
+);
 
-  if (scene && layerMeshes.length > 0) {
-    updateLayerMeshes();
+// Update colors/positions reactively when cycle data changes
+// Use rAF-based throttle to avoid excessive Three.js updates
+let updatePending = false;
+watch(
+  [() => store.cycleVersion, colorMode],
+  () => {
+    if (!scene || layerMeshes.length === 0) return;
+    if (updatePending) return;
+    updatePending = true;
+    requestAnimationFrame(() => {
+      updatePending = false;
+      updateLayerMeshes();
+      updatePaths();
+    });
   }
-});
-
-// Update request paths reactively
-watchEffect(() => {
-  const _paths = requestPathLines.value;
-  if (scene && pathsGroup) {
-    updatePaths();
-  }
-});
+);
 </script>
 
 <template>

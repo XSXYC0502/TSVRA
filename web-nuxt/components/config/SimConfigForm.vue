@@ -5,7 +5,7 @@ import { useSimulationStore } from '~/stores/simulation';
 import { useWebSocket } from '~/composables/useWebSocket';
 
 const store = useSimulationStore();
-const { wsConnected } = storeToRefs(store);
+const { wsConnected, binaryAvailable } = storeToRefs(store);
 const ws = useWebSocket();
 
 const config = reactive({
@@ -16,7 +16,6 @@ const config = reactive({
   verticalDelay: 1,
   horizontalDelay: 1000,
   cycles: 100000,
-  batchSize: 1000,
   seed: 0,
 });
 
@@ -27,7 +26,6 @@ const fields = [
   { key: 'verticalDelay', label: 'Vertical Delay', type: 'number', min: 1 },
   { key: 'horizontalDelay', label: 'Horizontal Delay', type: 'number', min: 1 },
   { key: 'cycles', label: 'Cycles', type: 'number', min: 1000 },
-  { key: 'batchSize', label: 'Batch Size', type: 'number', min: 100 },
   { key: 'seed', label: 'Seed (0=random)', type: 'number', min: 0 },
 ] as const;
 
@@ -67,11 +65,11 @@ function handleStart() {
     </div>
 
     <button
-      :disabled="!wsConnected"
+      :disabled="!wsConnected || binaryAvailable === false"
       class="w-full py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-700 disabled:text-gray-500 rounded font-medium text-sm"
       @click="handleStart"
     >
-      Start Simulation
+      {{ binaryAvailable === false ? 'Binary Not Found' : 'Start Simulation' }}
     </button>
   </div>
 </template>

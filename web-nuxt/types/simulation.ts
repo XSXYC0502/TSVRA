@@ -71,8 +71,8 @@ export interface InitMessage {
   initialFailures: Point[];
 }
 
-export interface BatchUpdate {
-  type: 'batch';
+export interface CycleUpdate {
+  type: 'cycle';
   cycle: number;
   events: {
     newRequests: LiveRequest[];

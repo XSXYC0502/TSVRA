@@ -4,65 +4,94 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-TSVRA (TSV Redundancy Architecture) is a 3D chip Through-Silicon Via routing simulation system written in C++20. It models multi-layer chip structures with TSV transmission, failure handling, and redundant routing mechanisms. The project is research-oriented, used for evaluating TSV redundancy strategies and routing algorithm performance.
+TSVRA (TSV Redundancy Architecture) is a 3D chip Through-Silicon Via routing simulation system. It has two parts: a C++20 cycle-based simulator and a Nuxt 4 web frontend for real-time visualization. This worktree (`visual-web`, branch `feature/nuxt4-migration`) contains the web visualization work.
 
-## Build Commands
+## Build & Run
 
 ```bash
-# Full build (from project root)
+# C++ simulator (from project root)
 mkdir -p build && cd build && cmake .. && make
+# Binary: bin/tsvra
 
-# Rebuild after changes (from build/)
-cd build && make
-
-# Clean rebuild
-cd build && make clean && make
+# Web frontend (from web-nuxt/)
+cd web-nuxt && npm install
+npm run dev          # Dev server at http://localhost:3000
+npm run build        # Production build to .output/
+npm run preview      # Preview production build
 ```
 
-The executable is output to `bin/tsvra`. The build uses a specific GCC 16 compiler at `/usr/local/gcc-16-20251109/bin/g++` — this is hardcoded in CMakeLists.txt due to stdlib pthread bugs in other GCC 16 builds.
+The C++ build uses GCC 16 at `/usr/local/gcc-16-20251109/bin/g++` (hardcoded in CMakeLists.txt). `-fpermissive` and no `-Werror` are required due to GCC 16 stdlib bugs.
 
-## Running
+The web frontend requires `bin/tsvra` to exist — it spawns the binary as a child process. Build C++ first.
 
-```bash
-# Default run
-./bin/tsvra
+## Architecture: C++ ↔ Web Integration
 
-# With config file
-./bin/tsvra --config config.ini
-
-# Common flags: --layers, --grid-factor, --failure-mode <a|b|c>, --failure-rate, --cycles, --seed, --output
-```
-
-Output: two CSV files — `{prefix}_summary.csv` (aggregate stats) and `{prefix}_requests.csv` (per-request details).
-
-## Architecture
-
-The simulation follows a cycle-based loop orchestrated by `Simulator`:
+This is the most important architectural boundary in the project:
 
 ```
-main.cpp → Config → Simulator → { Grid, Router, RequestGenerator, Statistics }
+Browser (Vue 3 SPA)  ←WebSocket→  Nitro Server  ←stdio→  C++ Process (bin/tsvra)
 ```
 
-**Core components** (each has a header in `include/` and implementation in `src/`):
+**How it works:**
 
-- **Config** — Loads from `config.ini` or CLI args. Owns all simulation parameters.
-- **Grid** — 3D vector `grid_[z][y][x]` of TSV units. Size: `(4*grid_factor)² × num_layers`. Each 4×4 region has 4 corner redundant TSVs. Handles initial and runtime failure injection.
-- **Router** — A* pathfinding through the 3D grid. Heuristic is pluggable via `set_heuristic()`. Costs: `vertical_delay` for layer changes, `horizontal_delay` for same-layer moves.
-- **RequestGenerator** — Hotspot-weighted random sampling of 4×4 TSV regions. Each region gets a weight in [0.5, 1.5]; requests are generated per-cycle with ~1% probability.
-- **Simulator** — Per-cycle loop: generate requests → update transmitting → inject runtime failures → route pending requests. Reports progress at 5% intervals.
-- **Statistics** — Collects latency/success/failure metrics and exports to CSV.
+1. User clicks Start in browser → WebSocket sends `{ type: "start", config: {...} }` to Nitro server
+2. `simulationManager.ts` spawns `bin/tsvra --json-stream --layers N --grid-factor N ...` as a child process
+3. C++ writes one JSON object per line to **stdout** — one `init` message, then one `cycle` message per simulation cycle, then one `done` message
+4. Nitro reads stdout line-by-line via `readline`, parses JSON, forwards to browser via WebSocket
+5. Browser controls (pause/resume/stop/step) send WebSocket commands → Nitro writes single chars to C++ **stdin** (`p`/`r`/`s`/`n`)
+6. C++ polls stdin with non-blocking `poll()` between cycles
 
-**Key data structures** (in `request.hpp`):
-- `Point` — 3D coordinate (x, y, z)
-- `Request` — Routing request with status (PENDING/TRANSMITTING/COMPLETED/FAILED)
+**Key integration files:**
 
-**Three failure modes**: (a) initial-only, (b) runtime-only, (c) combined.
+| File | Role |
+|------|------|
+| `src/simulator.cpp` | C++ side: `emit_init_json()`, `emit_cycle_json()`, `emit_done_json()`, `poll_stdin_commands()` |
+| `include/simulator.hpp` | JSON event structs: `JsonNewRequest`, `JsonCompleted`, `JsonFailed`, `JsonNewFailure`, `JsonReroute` |
+| `web-nuxt/server/utils/simulationManager.ts` | Spawns C++ process, reads stdout JSON, sends stdin commands |
+| `web-nuxt/server/api/_ws.ts` | WebSocket handler: routes client commands, controls message forwarding speed |
+| `web-nuxt/composables/useWebSocket.ts` | Browser-side WebSocket client |
+| `web-nuxt/stores/simulation.ts` | Pinia store: accumulates state from WebSocket messages |
+| `web-nuxt/types/simulation.ts` | TypeScript types matching the C++ JSON format |
+
+**Speed control:** The Nitro server queues C++ messages and forwards them at a controlled rate (step/slow/medium/high/auto). In "high" mode, messages bypass the queue. In "auto" mode, it slows down when `keyEvent: true` (failures, reroutes).
+
+## C++ JSON Streaming Protocol
+
+When run with `--json-stream`, the C++ binary communicates via stdio:
+
+**stdout (C++ → server):** One JSON object per line:
+- `{ "type": "init", "config": {...}, "grid": [...], "hotspotWeights": [...], "initialFailures": [...] }` — once at start
+- `{ "type": "cycle", "cycle": N, "events": { "newRequests": [...], "completed": [...], "failed": [...], "newFailures": [...], "reroutes": [...] }, "stats": {...}, "keyEvent": bool }` — every cycle
+- `{ "type": "done", "summary": {...} }` — at completion
+
+**stdin (server → C++):** Single characters, non-blocking polled:
+- `p` pause, `r` resume, `s` stop, `n` step (advance one cycle then pause)
+
+**stderr:** Human-readable Chinese debug output (forwarded to browser as `{ type: "stderr", line }`)
+
+## C++ Simulation Core
+
+Cycle-based loop: `main.cpp → Config → Simulator → { Grid, Router, RequestGenerator, Statistics }`
+
+- **Grid** — 3D array `grid_[z][y][x]` of TSV units. Size: `(4*grid_factor)² × num_layers`. Each 4×4 region has 4 corner redundant TSVs.
+- **Router** — A* pathfinding. Costs: `vertical_delay` (layer changes), `horizontal_delay` (same-layer). Heuristic pluggable via `set_heuristic()`.
+- **RequestGenerator** — Hotspot-weighted random sampling. ~1% probability per cycle per region.
+- **Simulator** — Per-cycle: generate requests → update transmitting → inject runtime failures → route pending. In `--json-stream` mode, also accumulates events into `cycle_*` vectors and emits JSON.
+- **Three failure modes:** (a) initial-only, (b) runtime-only, (c) combined.
+
+## Web Frontend
+
+**Tech stack:** Nuxt 4.3 (SPA mode, `ssr: false`) | Vue 3 | Pinia | Raw Three.js (InstancedMesh) | Chart.js + vue-chartjs | Tailwind CSS 4
+
+**Views:** Dashboard (KPI cards + charts), 3D Grid (Three.js), Heatmap (2D traffic density), Failure Analysis (failure map + timeline), Quad (2×2 of all views).
+
+**Pinia store** (`stores/simulation.ts`): Accumulates all state from WebSocket. Uses `shallowRef` + `triggerRef` for large data (3D grid array, active requests Map, cumulative traffic) to avoid deep reactivity overhead.
+
+**Binary health check:** On WebSocket connect, server checks if `bin/tsvra` exists and reports to client. UI disables Start if binary unavailable.
 
 ## Conventions
 
-- Language: C++20. Uses `std::optional`, `std::unique_ptr`, lambdas, structured bindings.
-- No external dependencies beyond the C++ standard library.
-- No test framework currently in place.
-- Documentation and comments are in Chinese.
-- `-Werror` is intentionally disabled due to GCC 16.0.0 stdlib bugs (see CMakeLists.txt comments).
-- `-fpermissive` is required for the same reason.
+- C++20. No external deps beyond stdlib. Comments in Chinese.
+- Web: TypeScript, Vue 3 Composition API, Pinia stores.
+- No test framework for either C++ or web.
+- `nuxt.config.ts` has `experimental.websocket: true` in both Nuxt and Nitro config — required for the WebSocket handler.

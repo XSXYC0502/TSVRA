@@ -1,8 +1,8 @@
 import { defineStore } from 'pinia';
-import { ref, shallowRef } from 'vue';
+import { ref, shallowRef, triggerRef } from 'vue';
 import type {
   SimConfig, TSVState, LiveRequest, CompletedRequest, FailedRequest,
-  RunningStats, FailureEvent, TimePoint, InitMessage, BatchUpdate,
+  RunningStats, FailureEvent, TimePoint, InitMessage, CycleUpdate,
   DoneMessage, SimStatus, ViewMode, SpeedMode, ColorMode
 } from '~/types/simulation';
 
@@ -10,6 +10,16 @@ export const useSimulationStore = defineStore('simulation', () => {
   // Connection
   const wsConnected = ref(false);
   const simStatus = ref<SimStatus>('idle');
+
+  // Binary status (from server health check)
+  const binaryAvailable = ref<boolean | null>(null);
+  const binaryPath = ref<string | null>(null);
+
+  // Error state
+  const error = ref<{ code: string; message: string } | null>(null);
+
+  // Stderr log
+  const stderrLines = ref<string[]>([]);
 
   // Config
   const config = ref<SimConfig | null>(null);
@@ -42,6 +52,15 @@ export const useSimulationStore = defineStore('simulation', () => {
   const speedMode = ref<SpeedMode>('high');
   const colorMode = ref<ColorMode>('type');
 
+  // Stale data tracking
+  const lastCycleTime = ref<number>(0);
+
+  // Reactivity trigger: incremented on every cycle update
+  const cycleVersion = ref(0);
+
+  // Cumulative traffic: 2D array [y][x] tracking total path usage across all cycles
+  const cumulativeTraffic = shallowRef<number[][] | null>(null);
+
   // Actions
   function setWsConnected(connected: boolean) {
     wsConnected.value = connected;
@@ -49,6 +68,24 @@ export const useSimulationStore = defineStore('simulation', () => {
 
   function setSimStatus(status: SimStatus) {
     simStatus.value = status;
+  }
+
+  function setBinaryStatus(available: boolean, path: string | null) {
+    binaryAvailable.value = available;
+    binaryPath.value = path;
+  }
+
+  function setError(err: { code: string; message: string }) {
+    error.value = err;
+    simStatus.value = 'idle';
+  }
+
+  function clearError() {
+    error.value = null;
+  }
+
+  function addStderrLine(line: string) {
+    stderrLines.value = [...stderrLines.value.slice(-200), line];
   }
 
   function setActiveView(view: ViewMode) {
@@ -64,6 +101,8 @@ export const useSimulationStore = defineStore('simulation', () => {
   }
 
   function applyInitMessage(msg: InitMessage) {
+    error.value = null;
+    lastCycleTime.value = Date.now();
     const { config: msgConfig, grid, hotspotWeights: hsWeights, initialFailures } = msg;
 
     // Build 3D grid array
@@ -81,13 +120,20 @@ export const useSimulationStore = defineStore('simulation', () => {
     // Apply grid data
     for (const tsv of grid) {
       if (newGrid[tsv.z]?.[tsv.y]?.[tsv.x]) {
-        newGrid[tsv.z][tsv.y][tsv.x].redundant = tsv.redundant;
-        newGrid[tsv.z][tsv.y][tsv.x].failed = tsv.failed;
+        newGrid[tsv.z]![tsv.y]![tsv.x]!.redundant = tsv.redundant;
+        newGrid[tsv.z]![tsv.y]![tsv.x]!.failed = tsv.failed;
       }
     }
 
     // Track initial failure positions
     const positions = initialFailures.map(f => ({ x: f.x, y: f.y, z: f.z }));
+
+    // Initialize cumulative traffic as 2D zero-array
+    const trafficGrid: number[][] = [];
+    for (let y = 0; y < msgConfig.gridSize; y++) {
+      trafficGrid[y] = new Array(msgConfig.gridSize).fill(0);
+    }
+    cumulativeTraffic.value = trafficGrid;
 
     config.value = msgConfig;
     tsvGrid.value = newGrid;
@@ -99,6 +145,7 @@ export const useSimulationStore = defineStore('simulation', () => {
     completedCount.value = 0;
     failedCount.value = 0;
     currentCycle.value = 0;
+    cycleVersion.value = 0;
     latencySamples.value = [];
     throughputTimeline.value = [];
     failureTimeline.value = [];
@@ -108,13 +155,31 @@ export const useSimulationStore = defineStore('simulation', () => {
     stats.value = null;
   }
 
-  function applyBatchUpdate(msg: BatchUpdate) {
+  function applyCycleUpdate(msg: CycleUpdate) {
+    lastCycleTime.value = Date.now();
     const { cycle, events, stats: msgStats } = msg;
     const newActiveRequests = new Map(activeRequests.value);
 
     // Add new requests
     for (const req of events.newRequests) {
       newActiveRequests.set(req.id, req);
+    }
+
+    // Accumulate path coords into cumulativeTraffic
+    if (cumulativeTraffic.value) {
+      const traffic = cumulativeTraffic.value;
+      const rows = traffic.length;
+      const cols = rows > 0 ? traffic[0]!.length : 0;
+      for (const req of events.newRequests) {
+        if (req.path) {
+          for (const [x, y] of req.path) {
+            if (y >= 0 && y < rows && x >= 0 && x < cols) {
+              traffic[y]![x] = (traffic[y]![x] ?? 0) + 1;
+            }
+          }
+        }
+      }
+      triggerRef(cumulativeTraffic);
     }
 
     // Remove completed
@@ -127,16 +192,13 @@ export const useSimulationStore = defineStore('simulation', () => {
       newActiveRequests.delete(req.id);
     }
 
-    // Update grid failures
-    let newGrid = tsvGrid.value;
-    if (events.newFailures.length > 0 && newGrid) {
-      newGrid = newGrid.map(layer => layer.map(row => row.map(tsv => ({ ...tsv }))));
+    // Update grid failures — mutate in-place instead of deep-copying
+    if (events.newFailures.length > 0 && tsvGrid.value) {
       for (const f of events.newFailures) {
-        if (newGrid[f.z]?.[f.y]?.[f.x]) {
-          newGrid[f.z][f.y][f.x].failed = true;
-        }
+        const cell = tsvGrid.value[f.z]?.[f.y]?.[f.x];
+        if (cell) cell.failed = true;
       }
-      tsvGrid.value = newGrid;
+      triggerRef(tsvGrid);
     }
 
     // Latency samples
@@ -159,6 +221,7 @@ export const useSimulationStore = defineStore('simulation', () => {
     recentCompleted.value = events.completed;
     recentFailed.value = events.failed;
     stats.value = msgStats;
+    cycleVersion.value++;
   }
 
   function applyDoneMessage(msg: DoneMessage) {
@@ -169,6 +232,11 @@ export const useSimulationStore = defineStore('simulation', () => {
   function reset() {
     wsConnected.value = wsConnected.value; // preserve connection state
     simStatus.value = 'idle';
+    error.value = null;
+    stderrLines.value = [];
+    lastCycleTime.value = 0;
+    cycleVersion.value = 0;
+    cumulativeTraffic.value = null;
     config.value = null;
     tsvGrid.value = null;
     hotspotWeights.value = null;
@@ -194,6 +262,13 @@ export const useSimulationStore = defineStore('simulation', () => {
     // State
     wsConnected,
     simStatus,
+    binaryAvailable,
+    binaryPath,
+    error,
+    stderrLines,
+    lastCycleTime,
+    cycleVersion,
+    cumulativeTraffic,
     config,
     tsvGrid,
     hotspotWeights,
@@ -217,11 +292,15 @@ export const useSimulationStore = defineStore('simulation', () => {
     // Actions
     setWsConnected,
     setSimStatus,
+    setBinaryStatus,
+    setError,
+    clearError,
+    addStderrLine,
     setActiveView,
     setSpeedMode,
     setColorMode,
     applyInitMessage,
-    applyBatchUpdate,
+    applyCycleUpdate,
     applyDoneMessage,
     reset,
   };

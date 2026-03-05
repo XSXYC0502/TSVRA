@@ -37,6 +37,10 @@ public:
     uint64_t get_failed_requests() const { return failed_requests_; }
     double get_average_latency() const;
     uint64_t get_max_latency() const { return max_latency_; }
+    uint64_t get_min_latency() const { return min_latency_; }
+    uint64_t get_total_latency() const { return total_latency_; }
+    uint64_t get_redundant_tsv_usages() const { return redundant_tsv_usages_; }
+    uint32_t get_current_failed_tsvs() const { return current_failed_tsvs_; }
     
 private:
     const Config& config_;

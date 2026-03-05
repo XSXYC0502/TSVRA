@@ -1,13 +1,14 @@
 <script setup lang="ts">
-import { computed, watchEffect, ref, onMounted, onBeforeUnmount, watch } from 'vue';
+import { computed, ref, onMounted, onBeforeUnmount, watch } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useSimulationStore } from '~/stores/simulation';
 import { viridis } from '~/utils/colorScales';
+import { scheduleBuild } from '~/composables/useBuildQueue';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
 const store = useSimulationStore();
-const { tsvGrid, config, activeRequests, hotspotWeights } = storeToRefs(store);
+const { tsvGrid, config, hotspotWeights, activeView, cumulativeTraffic } = storeToRefs(store);
 
 const canvasContainer = ref<HTMLDivElement | null>(null);
 let renderer: THREE.WebGLRenderer | null = null;
@@ -26,26 +27,34 @@ const tempColor = new THREE.Color();
 const gridSize = computed(() => config.value?.gridSize ?? 0);
 const instanceCount = computed(() => gridSize.value * gridSize.value);
 
-// Compute traffic map
+// Visibility: pause animation when not visible
+const isVisible = computed(() => activeView.value === 'heatmap' || activeView.value === 'quad');
+
+// Compute traffic data using cumulativeTraffic as primary source
 const trafficData = computed(() => {
   if (!config.value || !tsvGrid.value) return { trafficMap: [] as number[][], maxTraffic: 0 };
   const size = config.value.gridSize;
-  const map: number[][] = Array.from({ length: size }, () => Array(size).fill(0));
-  let max = 0;
 
-  for (const req of activeRequests.value.values()) {
-    if (req.path) {
-      for (const [x, y] of req.path) {
-        if (y >= 0 && y < size && x >= 0 && x < size) {
-          map[y][x]++;
-          if (map[y][x] > max) max = map[y][x];
-        }
+  // Use cumulative traffic if available and has data
+  if (cumulativeTraffic.value) {
+    const traffic = cumulativeTraffic.value;
+    let max = 0;
+    for (let y = 0; y < size; y++) {
+      for (let x = 0; x < size; x++) {
+        if (traffic[y][x] > max) max = traffic[y][x];
       }
+    }
+
+    if (max > 0) {
+      return { trafficMap: traffic, maxTraffic: max };
     }
   }
 
-  // Use hotspot weights as baseline when no traffic
-  if (hotspotWeights.value && max === 0) {
+  // Fallback to hotspot weights as baseline when no cumulative traffic
+  const map: number[][] = Array.from({ length: size }, () => Array(size).fill(0));
+  let max = 0;
+
+  if (hotspotWeights.value) {
     let minW = Infinity;
     let maxW = -Infinity;
     for (const row of hotspotWeights.value) {
@@ -90,6 +99,12 @@ function buildScene() {
   if (!canvasContainer.value || !config.value) return;
   const el = canvasContainer.value;
 
+  // Retry via rAF if container has zero dimensions (just transitioned from display:none)
+  if (el.clientWidth === 0 || el.clientHeight === 0) {
+    requestAnimationFrame(() => buildScene());
+    return;
+  }
+
   // Clean up previous scene if any
   disposeScene();
 
@@ -129,13 +144,8 @@ function buildScene() {
   updateRegionLines();
   updateHeatmapMesh();
 
-  // Animation loop
-  function animate() {
-    animationId = requestAnimationFrame(animate);
-    controls!.update();
-    renderer!.render(scene!, camera!);
-  }
-  animate();
+  // Start animation loop
+  startAnimation();
 
   // Handle resize
   resizeObserver = new ResizeObserver(() => {
@@ -148,6 +158,25 @@ function buildScene() {
     renderer.setSize(w, h);
   });
   resizeObserver.observe(el);
+}
+
+function startAnimation() {
+  if (animationId) return;
+  function animate() {
+    animationId = requestAnimationFrame(animate);
+    controls?.update();
+    if (renderer && scene && camera) {
+      renderer.render(scene, camera);
+    }
+  }
+  animate();
+}
+
+function stopAnimation() {
+  if (animationId) {
+    cancelAnimationFrame(animationId);
+    animationId = 0;
+  }
 }
 
 function updateRegionLines() {
@@ -198,8 +227,7 @@ function updateHeatmapMesh() {
 }
 
 function disposeScene() {
-  cancelAnimationFrame(animationId);
-  animationId = 0;
+  stopAnimation();
   if (resizeObserver) {
     resizeObserver.disconnect();
     resizeObserver = null;
@@ -233,7 +261,7 @@ function disposeScene() {
 }
 
 onMounted(() => {
-  if (config.value && tsvGrid.value) {
+  if (isVisible.value && config.value && tsvGrid.value) {
     buildScene();
   }
 });
@@ -244,21 +272,48 @@ onBeforeUnmount(() => {
 
 // Rebuild scene when config changes (different grid size)
 watch([config], () => {
-  if (config.value && tsvGrid.value && canvasContainer.value) {
+  if (isVisible.value && config.value && tsvGrid.value && canvasContainer.value) {
     buildScene();
   }
 });
 
-// Update heatmap colors reactively
-watchEffect(() => {
-  // Track dependencies
-  const _td = trafficData.value;
-  const _grid = tsvGrid.value;
+// Handle view switching: build scene on first show, pause/resume animation
+watch(
+  () => store.activeView,
+  () => {
+    if (isVisible.value) {
+      if (!scene && config.value && tsvGrid.value) {
+        scheduleBuild(() => buildScene());
+      } else if (scene) {
+        startAnimation();
+        const el = canvasContainer.value;
+        if (renderer && camera && el && el.clientWidth > 0) {
+          camera.aspect = el.clientWidth / el.clientHeight;
+          camera.updateProjectionMatrix();
+          renderer.setSize(el.clientWidth, el.clientHeight);
+        }
+      }
+    } else {
+      stopAnimation();
+    }
+  },
+  { flush: 'post' }
+);
 
-  if (scene && heatmapMesh) {
-    updateHeatmapMesh();
+// Update heatmap colors reactively on cycle updates
+let updatePending = false;
+watch(
+  [() => store.cycleVersion],
+  () => {
+    if (!scene || !heatmapMesh) return;
+    if (updatePending) return;
+    updatePending = true;
+    requestAnimationFrame(() => {
+      updatePending = false;
+      updateHeatmapMesh();
+    });
   }
-});
+);
 </script>
 
 <template>

@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed, watchEffect, ref, onMounted, onBeforeUnmount, watch } from 'vue';
+import { computed, ref, onMounted, onBeforeUnmount, watch } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useSimulationStore } from '~/stores/simulation';
 import { formatNumber } from '~/utils/formatters';
+import { scheduleBuild } from '~/composables/useBuildQueue';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import type { TSVState, SimConfig, FailureEvent } from '~/types/simulation';
@@ -22,7 +23,7 @@ import { Bar, Line } from 'vue-chartjs';
 ChartJS.register(CategoryScale, LinearScale, BarElement, LineElement, PointElement, Filler, Tooltip, Legend);
 
 const store = useSimulationStore();
-const { tsvGrid, config, failureTimeline, failedTSVPositions } = storeToRefs(store);
+const { tsvGrid, config, failureTimeline, failedTSVPositions, activeView } = storeToRefs(store);
 
 const layerSpacing = 3;
 
@@ -43,6 +44,9 @@ const totalInstances = computed(() => {
   if (!config.value) return 0;
   return config.value.gridSize * config.value.gridSize * config.value.numLayers;
 });
+
+// Visibility: pause animation when not visible
+const isVisible = computed(() => activeView.value === 'failure' || activeView.value === 'quad');
 
 // Failure timeline chart data
 const failureTimelineChartData = computed(() => {
@@ -173,6 +177,12 @@ function buildScene() {
   if (!canvasContainer.value || !config.value || !tsvGrid.value) return;
   const el = canvasContainer.value;
 
+  // Retry via rAF if container has zero dimensions (just transitioned from display:none)
+  if (el.clientWidth === 0 || el.clientHeight === 0) {
+    requestAnimationFrame(() => buildScene());
+    return;
+  }
+
   // Clean up previous scene if any
   disposeScene();
 
@@ -211,13 +221,8 @@ function buildScene() {
   // Initial update
   updateFailureMesh();
 
-  // Animation loop
-  function animate() {
-    animationId = requestAnimationFrame(animate);
-    controls!.update();
-    renderer!.render(scene!, camera!);
-  }
-  animate();
+  // Start animation loop
+  startAnimation();
 
   // Handle resize
   resizeObserver = new ResizeObserver(() => {
@@ -230,6 +235,25 @@ function buildScene() {
     renderer.setSize(w, h);
   });
   resizeObserver.observe(el);
+}
+
+function startAnimation() {
+  if (animationId) return;
+  function animate() {
+    animationId = requestAnimationFrame(animate);
+    controls?.update();
+    if (renderer && scene && camera) {
+      renderer.render(scene, camera);
+    }
+  }
+  animate();
+}
+
+function stopAnimation() {
+  if (animationId) {
+    cancelAnimationFrame(animationId);
+    animationId = 0;
+  }
 }
 
 function updateFailureMesh() {
@@ -270,8 +294,7 @@ function updateFailureMesh() {
 }
 
 function disposeScene() {
-  cancelAnimationFrame(animationId);
-  animationId = 0;
+  stopAnimation();
   if (resizeObserver) {
     resizeObserver.disconnect();
     resizeObserver = null;
@@ -298,7 +321,7 @@ function disposeScene() {
 }
 
 onMounted(() => {
-  if (config.value && tsvGrid.value) {
+  if (isVisible.value && config.value && tsvGrid.value) {
     buildScene();
   }
 });
@@ -309,21 +332,48 @@ onBeforeUnmount(() => {
 
 // Rebuild scene when config changes
 watch([config], () => {
-  if (config.value && tsvGrid.value && canvasContainer.value) {
+  if (isVisible.value && config.value && tsvGrid.value && canvasContainer.value) {
     buildScene();
   }
 });
 
-// Update failure mesh colors reactively
-watchEffect(() => {
-  // Track dependencies
-  const _grid = tsvGrid.value;
-  const _positions = failedTSVPositions.value;
+// Handle view switching: build scene on first show, pause/resume animation
+watch(
+  () => store.activeView,
+  () => {
+    if (isVisible.value) {
+      if (!scene && config.value && tsvGrid.value) {
+        scheduleBuild(() => buildScene());
+      } else if (scene) {
+        startAnimation();
+        const el = canvasContainer.value;
+        if (renderer && camera && el && el.clientWidth > 0) {
+          camera.aspect = el.clientWidth / el.clientHeight;
+          camera.updateProjectionMatrix();
+          renderer.setSize(el.clientWidth, el.clientHeight);
+        }
+      }
+    } else {
+      stopAnimation();
+    }
+  },
+  { flush: 'post' }
+);
 
-  if (scene && failureMesh) {
-    updateFailureMesh();
+// Update failure mesh colors reactively on cycle updates + failure changes
+let updatePending = false;
+watch(
+  [() => store.cycleVersion, failedTSVPositions],
+  () => {
+    if (!scene || !failureMesh) return;
+    if (updatePending) return;
+    updatePending = true;
+    requestAnimationFrame(() => {
+      updatePending = false;
+      updateFailureMesh();
+    });
   }
-});
+);
 </script>
 
 <template>

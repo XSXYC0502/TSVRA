@@ -49,6 +49,7 @@ public:
     double get_lambda2() const { return lambda2_; }
     uint32_t get_max_path_length() const { return max_path_length_; }
     double get_reliability_min() const { return reliability_min_; }
+    bool get_json_stream() const { return json_stream_; }
 
     // Setters
     void set_num_layers(uint32_t n) { num_layers_ = n; }
@@ -64,7 +65,8 @@ public:
     void set_lambda2(double v) { lambda2_ = v; }
     void set_max_path_length(uint32_t v) { max_path_length_ = v; }
     void set_reliability_min(double v) { reliability_min_ = v; }
-    
+    void set_json_stream(bool v) { json_stream_ = v; }
+
 private:
     uint32_t num_layers_;           // 层数，默认2
     uint32_t grid_factor_;          // N = 4 * grid_factor，默认4
@@ -79,6 +81,7 @@ private:
     double lambda2_;                // 风险权重（λ2），默认0.0
     uint32_t max_path_length_;      // 最大路径长度（L_max），0表示不限制
     double reliability_min_;        // 最小路径可靠性（R_min），0.0表示不约束
+    bool json_stream_;              // JSON流式输出模式
 
     // 辅助函数
     FailureMode parse_failure_mode(const std::string& mode_str) const;

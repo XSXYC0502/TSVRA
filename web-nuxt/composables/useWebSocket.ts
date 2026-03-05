@@ -50,8 +50,8 @@ export function connect(): void {
         case 'init':
           store.applyInitMessage(msg);
           break;
-        case 'batch':
-          store.applyBatchUpdate(msg);
+        case 'cycle':
+          store.applyCycleUpdate(msg);
           break;
         case 'done':
           store.applyDoneMessage(msg);
@@ -60,6 +60,15 @@ export function connect(): void {
           if (store.simStatus !== 'done') {
             store.setSimStatus('idle');
           }
+          break;
+        case 'error':
+          store.setError({ code: msg.code, message: msg.message });
+          break;
+        case 'status':
+          store.setBinaryStatus(msg.binaryAvailable, msg.binaryPath);
+          break;
+        case 'stderr':
+          store.addStderrLine(msg.line);
           break;
       }
     } catch (e) {
@@ -82,11 +91,12 @@ export function start(config: {
   verticalDelay: number;
   horizontalDelay: number;
   cycles: number;
-  batchSize: number;
   seed?: number;
 }): void {
+  const store = useSimulationStore();
+  store.clearError();
+  store.setSimStatus('running');
   send({ type: 'start', config });
-  useSimulationStore().setSimStatus('running');
 }
 
 export function pause(): void {
