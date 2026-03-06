@@ -6,9 +6,14 @@ import { viridis } from '~/utils/colorScales';
 import { scheduleBuild } from '~/composables/useBuildQueue';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { LineSegments2 } from 'three/addons/lines/LineSegments2.js';
+import { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js';
+import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
 
 const store = useSimulationStore();
 const { tsvGrid, config, hotspotWeights, activeView, cumulativeTraffic } = storeToRefs(store);
+
+const layerSpacing = 3;
 
 const canvasContainer = ref<HTMLDivElement | null>(null);
 let renderer: THREE.WebGLRenderer | null = null;
@@ -18,40 +23,45 @@ let controls: OrbitControls | null = null;
 let animationId = 0;
 let resizeObserver: ResizeObserver | null = null;
 
-let heatmapMesh: THREE.InstancedMesh | null = null;
-let regionLines: THREE.LineSegments | null = null;
-
-const dummy = new THREE.Object3D();
-const tempColor = new THREE.Color();
+let layerPlanes: THREE.Mesh[] = [];
+let gridFrame: LineSegments2 | null = null;
 
 const gridSize = computed(() => config.value?.gridSize ?? 0);
-const instanceCount = computed(() => gridSize.value * gridSize.value);
+const numLayers = computed(() => config.value?.numLayers ?? 0);
 
 // Visibility: pause animation when not visible
 const isVisible = computed(() => activeView.value === 'heatmap' || activeView.value === 'quad');
 
-// Compute traffic data using cumulativeTraffic as primary source
+// Compute traffic data from 3D cumulativeTraffic
 const trafficData = computed(() => {
-  if (!config.value || !tsvGrid.value) return { trafficMap: [] as number[][], maxTraffic: 0 };
+  if (!config.value || !tsvGrid.value) {
+    return { trafficMap: [] as number[][][], maxTraffic: 0 };
+  }
   const size = config.value.gridSize;
+  const layers = config.value.numLayers;
 
   // Use cumulative traffic if available and has data
-  if (cumulativeTraffic.value) {
+  if (cumulativeTraffic.value && cumulativeTraffic.value.length > 0) {
     const traffic = cumulativeTraffic.value;
     let max = 0;
-    for (let y = 0; y < size; y++) {
-      for (let x = 0; x < size; x++) {
-        if (traffic[y][x] > max) max = traffic[y][x];
+    for (let z = 0; z < traffic.length; z++) {
+      for (let y = 0; y < size; y++) {
+        for (let x = 0; x < size; x++) {
+          const v = traffic[z]?.[y]?.[x] ?? 0;
+          if (v > max) max = v;
+        }
       }
     }
-
     if (max > 0) {
       return { trafficMap: traffic, maxTraffic: max };
     }
   }
 
-  // Fallback to hotspot weights as baseline when no cumulative traffic
-  const map: number[][] = Array.from({ length: size }, () => Array(size).fill(0));
+  // Fallback to hotspot weights expanded per-layer
+  const map: number[][][] = [];
+  for (let z = 0; z < layers; z++) {
+    map[z] = Array.from({ length: size }, () => Array(size).fill(0));
+  }
   let max = 0;
 
   if (hotspotWeights.value) {
@@ -66,14 +76,15 @@ const trafficData = computed(() => {
     const range = maxW - minW || 1;
     for (let ry = 0; ry < hotspotWeights.value.length; ry++) {
       for (let rx = 0; rx < hotspotWeights.value[ry].length; rx++) {
-        const w = hotspotWeights.value[ry][rx];
-        const normalized = (w - minW) / range;
+        const normalized = (hotspotWeights.value[ry][rx] - minW) / range;
         for (let dy = 0; dy < 4; dy++) {
           for (let dx = 0; dx < 4; dx++) {
             const y = ry * 4 + dy;
             const x = rx * 4 + dx;
             if (y < size && x < size) {
-              map[y][x] = normalized;
+              for (let z = 0; z < layers; z++) {
+                map[z][y][x] = normalized;
+              }
             }
           }
         }
@@ -82,11 +93,13 @@ const trafficData = computed(() => {
     max = 1;
   }
 
-  // Fallback: if still no data, show uniform baseline
+  // Fallback: uniform baseline
   if (max === 0) {
-    for (let y = 0; y < size; y++) {
-      for (let x = 0; x < size; x++) {
-        map[y][x] = 0.5;
+    for (let z = 0; z < layers; z++) {
+      for (let y = 0; y < size; y++) {
+        for (let x = 0; x < size; x++) {
+          map[z][y][x] = 0.5;
+        }
       }
     }
     max = 1;
@@ -99,23 +112,24 @@ function buildScene() {
   if (!canvasContainer.value || !config.value) return;
   const el = canvasContainer.value;
 
-  // Retry via rAF if container has zero dimensions (just transitioned from display:none)
   if (el.clientWidth === 0 || el.clientHeight === 0) {
     requestAnimationFrame(() => buildScene());
     return;
   }
 
-  // Clean up previous scene if any
   disposeScene();
 
-  const size = gridSize.value;
+  const size = config.value.gridSize;
+  const layers = config.value.numLayers;
+  const gridHeight = (layers - 1) * layerSpacing;
+  const cameraDistance = size * 1.2;
+  const cameraY = Math.max(cameraDistance, gridHeight * 2 + size * 0.5);
 
   scene = new THREE.Scene();
   scene.background = new THREE.Color('#1a1a2e');
 
-  const cameraHeight = size * 1.4;
   camera = new THREE.PerspectiveCamera(50, el.clientWidth / el.clientHeight, 0.1, 1000);
-  camera.position.set(0, cameraHeight, cameraHeight * 0.01);
+  camera.position.set(cameraDistance, cameraY, cameraDistance);
 
   renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setSize(el.clientWidth, el.clientHeight);
@@ -126,28 +140,39 @@ function buildScene() {
   controls = new OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true;
   controls.dampingFactor = 0.1;
+  controls.target.set(0, gridHeight / 2, 0);
   controls.update();
 
-  // Create heatmap instanced mesh
-  const boxGeom = new THREE.BoxGeometry(1, 1, 1);
-  const basicMat = new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: false });
-  heatmapMesh = new THREE.InstancedMesh(boxGeom, basicMat, instanceCount.value);
-  scene.add(heatmapMesh);
+  // Heatmap planes with vertex colors (smooth interpolation)
+  layerPlanes = [];
+  for (let z = 0; z < layers; z++) {
+    const planeGeom = new THREE.PlaneGeometry(size, size, size - 1, size - 1);
+    planeGeom.rotateX(-Math.PI / 2);
+    const colors = new Float32Array(size * size * 3);
+    planeGeom.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    const mat = new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: false, side: THREE.DoubleSide });
+    const mesh = new THREE.Mesh(planeGeom, mat);
+    mesh.position.set(0, z * layerSpacing, 0);
+    scene.add(mesh);
+    layerPlanes.push(mesh);
+  }
 
-  // Region lines
-  const linesGeom = new THREE.BufferGeometry();
-  const linesMat = new THREE.LineBasicMaterial({ color: '#aaaaaa', transparent: true, opacity: 0.4 });
-  regionLines = new THREE.LineSegments(linesGeom, linesMat);
-  scene.add(regionLines);
+  // Zone grid lines (fat lines for visible thickness)
+  const lineGeom = new LineSegmentsGeometry();
+  const lineMat = new LineMaterial({
+    color: 0xffffff,
+    linewidth: 3,
+  });
+  lineMat.resolution.set(el.clientWidth, el.clientHeight);
+  gridFrame = new LineSegments2(lineGeom, lineMat);
+  scene.add(gridFrame);
+  updateGridFrame();
 
-  // Initial updates
-  updateRegionLines();
+  // Initial color update
   updateHeatmapMesh();
 
-  // Start animation loop
   startAnimation();
 
-  // Handle resize
   resizeObserver = new ResizeObserver(() => {
     if (!camera || !renderer) return;
     const w = el.clientWidth;
@@ -156,6 +181,9 @@ function buildScene() {
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
     renderer.setSize(w, h);
+    if (gridFrame) {
+      (gridFrame.material as LineMaterial).resolution.set(w, h);
+    }
   });
   resizeObserver.observe(el);
 }
@@ -179,51 +207,49 @@ function stopAnimation() {
   }
 }
 
-function updateRegionLines() {
-  if (!regionLines) return;
-  const size = gridSize.value;
-  if (size === 0) return;
-
-  const pts: number[] = [];
+function updateGridFrame() {
+  if (!gridFrame || !config.value) return;
+  const size = config.value.gridSize;
+  const layers = config.value.numLayers;
   const half = size / 2;
   const numRegions = size / 4;
-  for (let i = 0; i <= numRegions; i++) {
-    const pos = i * 4 - half;
-    pts.push(-half, 0.1, pos, half, 0.1, pos);
-    pts.push(pos, 0.1, -half, pos, 0.1, half);
+  const pts: number[] = [];
+
+  for (let layer = 0; layer < layers; layer++) {
+    const y = layer * layerSpacing;
+    for (let i = 0; i <= numRegions; i++) {
+      const pos = i * 4 - half;
+      pts.push(-half, y, pos, half, y, pos);
+      pts.push(pos, y, -half, pos, y, half);
+    }
   }
 
-  regionLines.geometry.dispose();
-  const geom = new THREE.BufferGeometry();
-  geom.setAttribute('position', new THREE.BufferAttribute(new Float32Array(pts), 3));
-  regionLines.geometry = geom;
+  (gridFrame.geometry as LineSegmentsGeometry).setPositions(pts);
 }
 
 function updateHeatmapMesh() {
-  if (!heatmapMesh || !config.value) return;
+  if (layerPlanes.length === 0 || !config.value) return;
 
   const size = gridSize.value;
-  const half = size / 2;
   const { trafficMap, maxTraffic } = trafficData.value;
   if (trafficMap.length === 0) return;
 
-  let i = 0;
-  for (let y = 0; y < size; y++) {
-    for (let x = 0; x < size; x++) {
-      dummy.position.set(x - half + 0.5, 0, y - half + 0.5);
-      dummy.scale.set(0.95, 0.1, 0.95);
-      dummy.updateMatrix();
-      heatmapMesh.setMatrixAt(i, dummy.matrix);
+  for (let z = 0; z < layerPlanes.length; z++) {
+    const colorAttr = layerPlanes[z].geometry.getAttribute('color') as THREE.BufferAttribute;
+    const colors = colorAttr.array as Float32Array;
 
-      const t = maxTraffic > 0 ? trafficMap[y][x] / maxTraffic : 0;
-      const [r, g, b] = viridis(t);
-      tempColor.setRGB(r, g, b);
-      heatmapMesh.setColorAt(i, tempColor);
-      i++;
+    for (let iy = 0; iy < size; iy++) {
+      for (let ix = 0; ix < size; ix++) {
+        const t = maxTraffic > 0 ? (trafficMap[z]?.[iy]?.[ix] ?? 0) / maxTraffic : 0;
+        const [r, g, b] = viridis(t);
+        const idx = (iy * size + ix) * 3;
+        colors[idx] = r;
+        colors[idx + 1] = g;
+        colors[idx + 2] = b;
+      }
     }
+    colorAttr.needsUpdate = true;
   }
-  heatmapMesh.instanceMatrix.needsUpdate = true;
-  if (heatmapMesh.instanceColor) heatmapMesh.instanceColor.needsUpdate = true;
 }
 
 function disposeScene() {
@@ -233,18 +259,18 @@ function disposeScene() {
     resizeObserver = null;
   }
 
-  if (heatmapMesh) {
-    heatmapMesh.geometry.dispose();
-    (heatmapMesh.material as THREE.Material).dispose();
-    scene?.remove(heatmapMesh);
-    heatmapMesh = null;
+  for (const mesh of layerPlanes) {
+    mesh.geometry.dispose();
+    (mesh.material as THREE.Material).dispose();
+    scene?.remove(mesh);
   }
+  layerPlanes = [];
 
-  if (regionLines) {
-    regionLines.geometry.dispose();
-    (regionLines.material as THREE.Material).dispose();
-    scene?.remove(regionLines);
-    regionLines = null;
+  if (gridFrame) {
+    gridFrame.geometry.dispose();
+    (gridFrame.material as THREE.Material).dispose();
+    scene?.remove(gridFrame);
+    gridFrame = null;
   }
 
   controls?.dispose();
@@ -270,7 +296,7 @@ onBeforeUnmount(() => {
   disposeScene();
 });
 
-// Rebuild scene when config changes (different grid size)
+// Rebuild scene when config changes (different grid size / layers)
 watch([config], () => {
   if (isVisible.value && config.value && tsvGrid.value && canvasContainer.value) {
     buildScene();
@@ -300,12 +326,14 @@ watch(
   { flush: 'post' }
 );
 
-// Update heatmap colors reactively on cycle updates
+// Update heatmap colors every N cycles
 let updatePending = false;
 watch(
   [() => store.cycleVersion],
   () => {
-    if (!scene || !heatmapMesh) return;
+    if (!scene || layerPlanes.length === 0) return;
+    const interval = store.heatmapUpdateInterval;
+    if (store.currentCycle % interval !== 0) return;
     if (updatePending) return;
     updatePending = true;
     requestAnimationFrame(() => {
@@ -323,12 +351,16 @@ watch(
   <div v-else class="absolute inset-0">
     <div ref="canvasContainer" class="absolute inset-0" />
 
-    <div class="absolute bottom-3 left-3 bg-gray-900/90 rounded p-2 text-xs">
+    <div class="absolute bottom-3 left-3 bg-gray-900/90 rounded p-2 text-xs max-w-56">
       <div class="mb-1 text-gray-400">Traffic Density</div>
       <div class="flex items-center gap-2">
         <span>Low</span>
         <div class="w-24 h-2 rounded" style="background:linear-gradient(to right, #440154, #31688e, #35b779, #fde725)" />
         <span>High</span>
+      </div>
+      <div class="mt-2 text-gray-500 leading-tight">
+        <div><span class="text-gray-400">Top layer:</span> edge request density (wire interconnects)</div>
+        <div><span class="text-gray-400">Other layers:</span> TSV transmission traffic</div>
       </div>
     </div>
   </div>

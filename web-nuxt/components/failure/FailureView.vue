@@ -6,6 +6,9 @@ import { formatNumber } from '~/utils/formatters';
 import { scheduleBuild } from '~/composables/useBuildQueue';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { LineSegments2 } from 'three/addons/lines/LineSegments2.js';
+import { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js';
+import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
 import type { TSVState, SimConfig, FailureEvent } from '~/types/simulation';
 import {
   Chart as ChartJS,
@@ -36,6 +39,7 @@ let controls: OrbitControls | null = null;
 let animationId = 0;
 let resizeObserver: ResizeObserver | null = null;
 let failureMesh: THREE.InstancedMesh | null = null;
+let gridFrame: LineSegments2 | null = null;
 
 const dummy = new THREE.Object3D();
 const tempColor = new THREE.Color();
@@ -179,9 +183,12 @@ function buildScene() {
 
   // Retry via rAF if container has zero dimensions (just transitioned from display:none)
   if (el.clientWidth === 0 || el.clientHeight === 0) {
+    console.log('[Failure] Container has zero dimensions, retrying...');
     requestAnimationFrame(() => buildScene());
     return;
   }
+
+  console.log('[Failure] buildScene:', { width: el.clientWidth, height: el.clientHeight, totalInstances: totalInstances.value });
 
   // Clean up previous scene if any
   disposeScene();
@@ -189,34 +196,56 @@ function buildScene() {
   scene = new THREE.Scene();
   scene.background = new THREE.Color('#1a1a2e');
 
+  const size = config.value.gridSize;
+  const gridHeight = (config.value.numLayers - 1) * layerSpacing;
+  const cameraDistance = size * 1.2;
+  const cameraY = Math.max(cameraDistance, gridHeight * 2 + size * 0.5);
+
   camera = new THREE.PerspectiveCamera(50, el.clientWidth / el.clientHeight, 0.1, 1000);
-  camera.position.set(15, 15, 15);
+  camera.position.set(cameraDistance, cameraY, cameraDistance);
 
   renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setSize(el.clientWidth, el.clientHeight);
   renderer.setPixelRatio(window.devicePixelRatio);
+  renderer.toneMapping = THREE.NoToneMapping;
   el.appendChild(renderer.domElement);
 
   controls = new OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true;
   controls.dampingFactor = 0.1;
+  controls.target.set(0, gridHeight / 2, 0);
   controls.update();
 
   // Lights
-  const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
+  const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
   scene.add(ambientLight);
-  const dirLight = new THREE.DirectionalLight(0xffffff, 0.6);
-  dirLight.position.set(10, 20, 10);
+  const dirLight = new THREE.DirectionalLight(0xffffff, 1.0);
+  dirLight.position.set(size, size * 2, size);
   scene.add(dirLight);
+  const dirLight2 = new THREE.DirectionalLight(0xffffff, 0.4);
+  dirLight2.position.set(-size, size, -size);
+  scene.add(dirLight2);
 
   // Create instanced mesh for failure grid
   const total = totalInstances.value;
   if (total > 0) {
     const boxGeom = new THREE.BoxGeometry(1, 1, 1);
-    const stdMat = new THREE.MeshStandardMaterial({ vertexColors: true, toneMapped: false });
+    const stdMat = new THREE.MeshLambertMaterial({ toneMapped: false });
     failureMesh = new THREE.InstancedMesh(boxGeom, stdMat, total);
     scene.add(failureMesh);
+    console.log('[Failure] Created InstancedMesh with', total, 'instances');
   }
+
+  // Zone grid lines (fat lines for visible thickness)
+  const lineGeom = new LineSegmentsGeometry();
+  const lineMat = new LineMaterial({
+    color: 0xffffff,
+    linewidth: 3,
+  });
+  lineMat.resolution.set(el.clientWidth, el.clientHeight);
+  gridFrame = new LineSegments2(lineGeom, lineMat);
+  scene.add(gridFrame);
+  updateGridFrame();
 
   // Initial update
   updateFailureMesh();
@@ -233,6 +262,9 @@ function buildScene() {
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
     renderer.setSize(w, h);
+    if (gridFrame) {
+      (gridFrame.material as LineMaterial).resolution.set(w, h);
+    }
   });
   resizeObserver.observe(el);
 }
@@ -256,6 +288,26 @@ function stopAnimation() {
   }
 }
 
+function updateGridFrame() {
+  if (!gridFrame || !config.value) return;
+  const size = config.value.gridSize;
+  const layers = config.value.numLayers;
+  const half = size / 2;
+  const numRegions = size / 4;
+  const pts: number[] = [];
+
+  for (let layer = 0; layer < layers; layer++) {
+    const y = layer * layerSpacing;
+    for (let i = 0; i <= numRegions; i++) {
+      const pos = i * 4 - half;
+      pts.push(-half, y, pos, half, y, pos);
+      pts.push(pos, y, -half, pos, y, half);
+    }
+  }
+
+  (gridFrame.geometry as LineSegmentsGeometry).setPositions(pts);
+}
+
 function updateFailureMesh() {
   if (!failureMesh || !tsvGrid.value || !config.value) return;
 
@@ -271,18 +323,28 @@ function updateFailureMesh() {
         const tsv = grid[z]?.[y]?.[x];
         if (!tsv) { i++; continue; }
         dummy.position.set(x - half + 0.5, z * layerSpacing, y - half + 0.5);
-        dummy.scale.set(0.8, 0.3, 0.8);
+        dummy.scale.set(0.85, 0.3, 0.85);
         dummy.updateMatrix();
         failureMesh.setMatrixAt(i, dummy.matrix);
 
-        if (tsv.failed) {
-          tempColor.setRGB(
-            tsv.redundant ? 1 : 1,
-            tsv.redundant ? 0.5 : 0.15,
-            tsv.redundant ? 0 : 0.15
-          );
+        // Check if this TSV column (x,y) is failed on ANY layer
+        let columnFailed = false;
+        for (let lz = 0; lz < layers; lz++) {
+          if (grid[lz]?.[y]?.[x]?.failed) { columnFailed = true; break; }
+        }
+
+        if (columnFailed) {
+          if (tsv.redundant) {
+            tempColor.setRGB(0.7, 0.2, 0.9);   // purple — failed redundant
+          } else {
+            tempColor.setRGB(1.0, 0.15, 0.15);  // red — failed normal
+          }
         } else {
-          tempColor.setRGB(0.15, 0.15, 0.2);
+          if (tsv.redundant) {
+            tempColor.setRGB(0.27, 0.53, 1.0);  // blue — healthy redundant
+          } else {
+            tempColor.setRGB(0.15, 0.7, 0.3);   // green — healthy normal
+          }
         }
         failureMesh.setColorAt(i, tempColor);
         i++;
@@ -291,6 +353,7 @@ function updateFailureMesh() {
   }
   failureMesh.instanceMatrix.needsUpdate = true;
   if (failureMesh.instanceColor) failureMesh.instanceColor.needsUpdate = true;
+  (failureMesh.material as THREE.Material).needsUpdate = true;
 }
 
 function disposeScene() {
@@ -305,6 +368,13 @@ function disposeScene() {
     (failureMesh.material as THREE.Material).dispose();
     scene?.remove(failureMesh);
     failureMesh = null;
+  }
+
+  if (gridFrame) {
+    gridFrame.geometry.dispose();
+    (gridFrame.material as THREE.Material).dispose();
+    scene?.remove(gridFrame);
+    gridFrame = null;
   }
 
   controls?.dispose();
@@ -366,6 +436,9 @@ watch(
   [() => store.cycleVersion, failedTSVPositions],
   () => {
     if (!scene || !failureMesh) return;
+    const lastUpdate = store.lastCycleUpdate;
+    const hasNewFailures = lastUpdate && lastUpdate.events.newFailures.length > 0;
+    if (!hasNewFailures && failedTSVPositions.value.length === 0) return;
     if (updatePending) return;
     updatePending = true;
     requestAnimationFrame(() => {
@@ -386,7 +459,26 @@ watch(
       <div class="px-3 py-2 text-sm font-medium text-gray-300 border-b border-gray-700/30 relative z-10">
         Failure Map ({{ failedTSVPositions.length }} failed TSVs)
       </div>
-      <div ref="canvasContainer" class="absolute inset-0 top-8" />
+      <div ref="canvasContainer" class="absolute left-0 right-0 bottom-0 top-8" />
+      <!-- Legend -->
+      <div class="absolute bottom-2 left-2 z-10 bg-gray-900/80 rounded px-2 py-1.5 text-xs space-y-1">
+        <div class="flex items-center gap-1.5">
+          <span class="inline-block w-3 h-3 rounded-sm" style="background: rgb(38, 179, 77)" />
+          <span class="text-gray-300">Normal</span>
+        </div>
+        <div class="flex items-center gap-1.5">
+          <span class="inline-block w-3 h-3 rounded-sm" style="background: rgb(69, 135, 255)" />
+          <span class="text-gray-300">Redundant</span>
+        </div>
+        <div class="flex items-center gap-1.5">
+          <span class="inline-block w-3 h-3 rounded-sm" style="background: rgb(255, 38, 38)" />
+          <span class="text-gray-300">Failed</span>
+        </div>
+        <div class="flex items-center gap-1.5">
+          <span class="inline-block w-3 h-3 rounded-sm" style="background: rgb(179, 51, 230)" />
+          <span class="text-gray-300">Failed Redundant</span>
+        </div>
+      </div>
     </div>
 
     <!-- Failure Timeline -->

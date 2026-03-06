@@ -58,8 +58,55 @@ export const useSimulationStore = defineStore('simulation', () => {
   // Reactivity trigger: incremented on every cycle update
   const cycleVersion = ref(0);
 
-  // Cumulative traffic: 2D array [y][x] tracking total path usage across all cycles
-  const cumulativeTraffic = shallowRef<number[][] | null>(null);
+  // Last cycle update message (for checking updateVisuals flag)
+  const lastCycleUpdate = ref<CycleUpdate | null>(null);
+
+  // Cumulative traffic: 3D array [z][y][x] tracking total path usage per layer
+  const cumulativeTraffic = shallowRef<number[][][] | null>(null);
+
+  // Heatmap update interval (in cycles)
+  const heatmapUpdateInterval = ref(10);
+
+  // Initialize preview grid from form defaults (before any simulation runs)
+  function initializePreview(gridFactor = 4, numLayers = 2) {
+    const gridSize = 4 * gridFactor;
+    const previewConfig: SimConfig = {
+      gridSize,
+      numLayers,
+      gridFactor,
+      failureMode: 'c',
+      failureRate: 0.001,
+      verticalDelay: 1,
+      horizontalDelay: 1000,
+      totalCycles: 100000,
+    };
+
+    const newGrid: TSVState[][][] = [];
+    for (let z = 0; z < numLayers; z++) {
+      newGrid[z] = [];
+      for (let y = 0; y < gridSize; y++) {
+        newGrid[z][y] = [];
+        for (let x = 0; x < gridSize; x++) {
+          const lx = x % 4, ly = y % 4;
+          const redundant = (lx === 0 || lx === 3) && (ly === 0 || ly === 3);
+          newGrid[z][y][x] = { x, y, z, redundant, failed: false, usageCount: 0 };
+        }
+      }
+    }
+
+    const trafficGrid: number[][][] = [];
+    for (let z = 0; z < numLayers; z++) {
+      trafficGrid[z] = [];
+      for (let y = 0; y < gridSize; y++) {
+        trafficGrid[z][y] = new Array(gridSize).fill(0);
+      }
+    }
+
+    config.value = previewConfig;
+    tsvGrid.value = newGrid;
+    cumulativeTraffic.value = trafficGrid;
+    hotspotWeights.value = null;
+  }
 
   // Actions
   function setWsConnected(connected: boolean) {
@@ -100,6 +147,10 @@ export const useSimulationStore = defineStore('simulation', () => {
     colorMode.value = mode;
   }
 
+  function setHeatmapUpdateInterval(n: number) {
+    heatmapUpdateInterval.value = Math.max(1, Math.round(n));
+  }
+
   function applyInitMessage(msg: InitMessage) {
     error.value = null;
     lastCycleTime.value = Date.now();
@@ -128,10 +179,13 @@ export const useSimulationStore = defineStore('simulation', () => {
     // Track initial failure positions
     const positions = initialFailures.map(f => ({ x: f.x, y: f.y, z: f.z }));
 
-    // Initialize cumulative traffic as 2D zero-array
-    const trafficGrid: number[][] = [];
-    for (let y = 0; y < msgConfig.gridSize; y++) {
-      trafficGrid[y] = new Array(msgConfig.gridSize).fill(0);
+    // Initialize cumulative traffic as 3D zero-array [z][y][x]
+    const trafficGrid: number[][][] = [];
+    for (let z = 0; z < msgConfig.numLayers; z++) {
+      trafficGrid[z] = [];
+      for (let y = 0; y < msgConfig.gridSize; y++) {
+        trafficGrid[z][y] = new Array(msgConfig.gridSize).fill(0);
+      }
     }
     cumulativeTraffic.value = trafficGrid;
 
@@ -157,6 +211,7 @@ export const useSimulationStore = defineStore('simulation', () => {
 
   function applyCycleUpdate(msg: CycleUpdate) {
     lastCycleTime.value = Date.now();
+    lastCycleUpdate.value = msg;
     const { cycle, events, stats: msgStats } = msg;
     const newActiveRequests = new Map(activeRequests.value);
 
@@ -165,16 +220,17 @@ export const useSimulationStore = defineStore('simulation', () => {
       newActiveRequests.set(req.id, req);
     }
 
-    // Accumulate path coords into cumulativeTraffic
+    // Accumulate path coords into cumulativeTraffic (per-layer)
     if (cumulativeTraffic.value) {
       const traffic = cumulativeTraffic.value;
-      const rows = traffic.length;
-      const cols = rows > 0 ? traffic[0]!.length : 0;
+      const layers = traffic.length;
+      const rows = layers > 0 ? traffic[0]!.length : 0;
+      const cols = rows > 0 ? traffic[0]![0]!.length : 0;
       for (const req of events.newRequests) {
         if (req.path) {
-          for (const [x, y] of req.path) {
-            if (y >= 0 && y < rows && x >= 0 && x < cols) {
-              traffic[y]![x] = (traffic[y]![x] ?? 0) + 1;
+          for (const [x, y, z] of req.path) {
+            if (z >= 0 && z < layers && y >= 0 && y < rows && x >= 0 && x < cols) {
+              traffic[z]![y]![x] = (traffic[z]![y]![x] ?? 0) + 1;
             }
           }
         }
@@ -236,10 +292,8 @@ export const useSimulationStore = defineStore('simulation', () => {
     stderrLines.value = [];
     lastCycleTime.value = 0;
     cycleVersion.value = 0;
-    cumulativeTraffic.value = null;
-    config.value = null;
-    tsvGrid.value = null;
-    hotspotWeights.value = null;
+    lastCycleUpdate.value = null;
+    initializePreview();
     activeRequests.value = new Map();
     completedCount.value = 0;
     failedCount.value = 0;
@@ -258,6 +312,9 @@ export const useSimulationStore = defineStore('simulation', () => {
     colorMode.value = 'type';
   }
 
+  // Initialize preview grid on store creation
+  initializePreview();
+
   return {
     // State
     wsConnected,
@@ -268,6 +325,7 @@ export const useSimulationStore = defineStore('simulation', () => {
     stderrLines,
     lastCycleTime,
     cycleVersion,
+    lastCycleUpdate,
     cumulativeTraffic,
     config,
     tsvGrid,
@@ -288,6 +346,7 @@ export const useSimulationStore = defineStore('simulation', () => {
     activeView,
     speedMode,
     colorMode,
+    heatmapUpdateInterval,
 
     // Actions
     setWsConnected,
@@ -299,9 +358,11 @@ export const useSimulationStore = defineStore('simulation', () => {
     setActiveView,
     setSpeedMode,
     setColorMode,
+    setHeatmapUpdateInterval,
     applyInitMessage,
     applyCycleUpdate,
     applyDoneMessage,
     reset,
+    initializePreview,
   };
 });

@@ -222,7 +222,7 @@ web-nuxt/
 
 **3D Grid** — Raw Three.js canvas with OrbitControls. Each chip layer as InstancedMesh. Three color modes: Type (normal=blue, redundant=gold), Traffic (viridis heatmap), Status (healthy=green, failed=red). Active request paths rendered as 3D lines. 4×4 region boundary wireframes.
 
-**Heatmap** — 2D overhead view. Color-mapped rectangles per grid cell showing traffic density. Region boundaries overlaid. Falls back to hotspot weights when no traffic data.
+**Heatmap** — Per-layer traffic density with smooth vertex-color interpolation. Top layer shows request density to the edges (wire interconnects); other layers show TSV transmission traffic. Region zone boundaries overlaid. Falls back to hotspot weights when no traffic data.
 
 **Failure Analysis** — 3D failure map highlighting failed TSVs, cumulative failure timeline chart.
 

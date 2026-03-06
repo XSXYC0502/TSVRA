@@ -80,6 +80,18 @@ const speedOptions: { key: SpeedMode; label: string }[] = [
         </div>
       </div>
 
+      <!-- Heatmap update interval -->
+      <div v-if="simStatus !== 'done'">
+        <label class="text-xs text-gray-400 mb-1 block">Heatmap Update (cycles)</label>
+        <input
+          type="number"
+          :value="store.heatmapUpdateInterval"
+          min="1"
+          class="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm focus:border-blue-500 focus:outline-none"
+          @input="(e: Event) => { store.setHeatmapUpdateInterval(Number((e.target as HTMLInputElement).value)) }"
+        />
+      </div>
+
       <!-- Running stats -->
       <div v-if="stats" class="space-y-1 text-sm">
         <h3 class="font-medium text-gray-300">Running Stats</h3>

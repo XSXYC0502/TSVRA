@@ -74,6 +74,7 @@ export interface InitMessage {
 export interface CycleUpdate {
   type: 'cycle';
   cycle: number;
+  updateVisuals: boolean;
   events: {
     newRequests: LiveRequest[];
     completed: CompletedRequest[];

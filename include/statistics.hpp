@@ -41,7 +41,9 @@ public:
     uint64_t get_total_latency() const { return total_latency_; }
     uint64_t get_redundant_tsv_usages() const { return redundant_tsv_usages_; }
     uint32_t get_current_failed_tsvs() const { return current_failed_tsvs_; }
-    
+    const std::vector<Request>& get_completed_requests_list() const { return completed_requests_list_; }
+    const std::vector<Request>& get_failed_requests_list() const { return failed_requests_list_; }
+
 private:
     const Config& config_;
     

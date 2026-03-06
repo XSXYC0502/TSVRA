@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { reactive } from 'vue';
+import { reactive, watch } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useSimulationStore } from '~/stores/simulation';
 import { useWebSocket } from '~/composables/useWebSocket';
@@ -32,6 +32,15 @@ const fields = [
 function handleStart() {
   ws.start({ ...config });
 }
+
+watch(
+  () => [config.numLayers, config.gridFactor],
+  ([numLayers, gridFactor]) => {
+    if (store.simStatus === 'idle') {
+      store.initializePreview(gridFactor, numLayers);
+    }
+  }
+);
 </script>
 
 <template>
@@ -62,6 +71,18 @@ function handleStart() {
         <option value="b">Runtime Only</option>
         <option value="c">Combined</option>
       </select>
+    </div>
+
+    <!-- Heatmap update interval -->
+    <div>
+      <label class="text-xs text-gray-400 block mb-0.5">Heatmap Update (cycles)</label>
+      <input
+        type="number"
+        :value="store.heatmapUpdateInterval"
+        min="1"
+        class="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm focus:border-blue-500 focus:outline-none"
+        @input="(e: Event) => { store.setHeatmapUpdateInterval(Number((e.target as HTMLInputElement).value)) }"
+      />
     </div>
 
     <button

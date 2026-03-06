@@ -192,6 +192,10 @@ void Simulator::emit_cycle_json() {
     std::ostringstream oss;
     oss << "{\"type\":\"cycle\",\"cycle\":" << current_cycle_;
 
+    // updateVisuals flag (every 10 cycles)
+    bool update_visuals = (current_cycle_ % 10 == 0);
+    oss << ",\"updateVisuals\":" << (update_visuals ? "true" : "false");
+
     // events
     oss << ",\"events\":{";
 

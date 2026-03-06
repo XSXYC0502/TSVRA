@@ -83,7 +83,7 @@ Cycle-based loop: `main.cpp → Config → Simulator → { Grid, Router, Request
 
 **Tech stack:** Nuxt 4.3 (SPA mode, `ssr: false`) | Vue 3 | Pinia | Raw Three.js (InstancedMesh) | Chart.js + vue-chartjs | Tailwind CSS 4
 
-**Views:** Dashboard (KPI cards + charts), 3D Grid (Three.js), Heatmap (2D traffic density), Failure Analysis (failure map + timeline), Quad (2×2 of all views).
+**Views:** Dashboard (KPI cards + charts), 3D Grid (Three.js), Heatmap (per-layer traffic density — top layer = edge request density, other layers = TSV traffic), Failure Analysis (failure map + timeline), Quad (2×2 of all views).
 
 **Pinia store** (`stores/simulation.ts`): Accumulates all state from WebSocket. Uses `shallowRef` + `triggerRef` for large data (3D grid array, active requests Map, cumulative traffic) to avoid deep reactivity overhead.
 

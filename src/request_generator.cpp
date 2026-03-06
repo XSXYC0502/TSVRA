@@ -12,7 +12,7 @@ RequestGenerator::RequestGenerator(const Config& config, std::mt19937& rng)
       next_request_id_(0),
       total_weight_(0.0),
       uniform_dist_(0.0, 1.0),
-      layer_dist_(0, config.get_num_layers() - 1) {
+      layer_dist_(0, config.get_num_layers() - 2) {
 }
 
 void RequestGenerator::initialize_hotspots() {

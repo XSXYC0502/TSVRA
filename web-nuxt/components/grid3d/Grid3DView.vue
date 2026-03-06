@@ -352,16 +352,33 @@ watch(
 // Update colors/positions reactively when cycle data changes
 // Use rAF-based throttle to avoid excessive Three.js updates
 let updatePending = false;
+let prevColorMode = colorMode.value;
 watch(
   [() => store.cycleVersion, colorMode],
   () => {
     if (!scene || layerMeshes.length === 0) return;
+    const lastUpdate = store.lastCycleUpdate;
+    const colorModeChanged = prevColorMode !== colorMode.value;
+    prevColorMode = colorMode.value;
+
+    let shouldUpdate = false;
+    if (colorModeChanged) {
+      shouldUpdate = true;
+    } else if (lastUpdate && lastUpdate.events.newFailures.length > 0) {
+      shouldUpdate = true;
+    } else if (colorMode.value === 'traffic' && lastUpdate?.updateVisuals) {
+      shouldUpdate = true;
+    }
+
+    const shouldUpdatePaths = lastUpdate && lastUpdate.events.newRequests.length > 0;
+    if (!shouldUpdate && !shouldUpdatePaths) return;
+
     if (updatePending) return;
     updatePending = true;
     requestAnimationFrame(() => {
       updatePending = false;
-      updateLayerMeshes();
-      updatePaths();
+      if (shouldUpdate) updateLayerMeshes();
+      if (shouldUpdatePaths) updatePaths();
     });
   }
 );

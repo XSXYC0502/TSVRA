@@ -1,0 +1,57 @@
+# Progress Tracker: Fix Blank Heatmap and Failure Map Views + Performance Optimization
+
+## Status: PLAN COMPLETE - READY FOR IMPLEMENTATION
+
+## Phase 1: Fix Blank Views - COMPLETED ✓
+
+✓ 1. Read CLAUDE.md and documentation
+✓ 2. Explored codebase structure
+✓ 3. Analyzed HeatmapView.vue component
+✓ 4. Analyzed FailureView.vue component
+✓ 5. Analyzed Grid3DView.vue (working reference)
+✓ 6. Identified root causes
+✓ 7. Created detailed fix plan
+✓ 8. Fixed Heatmap camera Z position
+✓ 9. Fixed Failure view canvas container layout
+✓ 10. Added debug logging
+✓ 11. Fixed camera lookAt and controls target
+✓ 12. Fixed box positioning and scaling
+✓ 13. Views now render correctly (grid lines + colored boxes visible)
+
+## Phase 2: Performance Optimization - PLANNING COMPLETE
+
+### Root Cause:
+- Every simulation cycle triggers full view updates
+- Causes excessive DOM/Three.js updates
+- UI is not smooth
+
+### Solution Plan Created:
+1. Add `updateVisuals` flag to C++ cycle JSON (true every 10 cycles)
+2. Heatmap updates only when `updateVisuals` is true
+3. Failure map updates on init + when new failures occur
+4. 3D Grid:
+   - Update paths when new requests routed
+   - Update TSV colors when failures occur
+   - Update traffic colors every 10 cycles (in traffic mode)
+   - Update immediately on color mode change
+
+### Files to Modify:
+- C++: src/simulator.cpp
+- Web: types/simulation.ts, stores/simulation.ts, 3 view components
+
+## Next Steps:
+
+[ ] Implement C++ updateVisuals flag
+[ ] Update TypeScript types
+[ ] Update store to track lastCycleUpdate
+[ ] Update HeatmapView watch logic
+[ ] Update FailureView watch logic
+[ ] Update Grid3DView watch logic
+[ ] Test and verify performance improvement
+[ ] Update plan.md and progress.txt after completion
+
+## Notes:
+- Grid3DView works correctly as reference implementation
+- Both broken views use same v-show pattern and retry logic
+- Issue is NOT with view switching mechanism
+- Issue is with specific component implementations
