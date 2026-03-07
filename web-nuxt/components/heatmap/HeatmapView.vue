@@ -300,6 +300,8 @@ onBeforeUnmount(() => {
 watch([config], () => {
   if (isVisible.value && config.value && tsvGrid.value && canvasContainer.value) {
     buildScene();
+  } else if (!isVisible.value && scene) {
+    disposeScene();
   }
 });
 

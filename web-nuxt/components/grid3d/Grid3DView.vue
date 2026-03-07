@@ -6,6 +6,9 @@ import { useColorScale } from '~/composables/useColorScale';
 import { scheduleBuild } from '~/composables/useBuildQueue';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { LineSegments2 } from 'three/addons/lines/LineSegments2.js';
+import { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js';
+import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
 import type { ColorMode } from '~/types/simulation';
 
 const store = useSimulationStore();
@@ -24,7 +27,7 @@ let resizeObserver: ResizeObserver | null = null;
 // Per-layer instanced meshes
 let layerMeshes: THREE.InstancedMesh[] = [];
 // Grid frame line segments
-let gridFrame: THREE.LineSegments | null = null;
+let gridFrame: LineSegments2 | null = null;
 // Group for request path lines
 let pathsGroup: THREE.Group | null = null;
 
@@ -38,23 +41,22 @@ const centerY = computed(() => ((numLayers.value - 1) * layerSpacing) / 2);
 // Visibility: pause animation when not visible
 const isVisible = computed(() => activeView.value === 'grid3d' || activeView.value === 'quad');
 
-// Compute traffic map from active requests
+// Compute traffic map from cumulative traffic (matches Heatmap behavior)
 const trafficMap = computed(() => {
-  const map = new Map<string, number>();
   let maxUsage = 1;
-  if (colorMode.value === 'traffic') {
-    for (const req of activeRequests.value.values()) {
-      if (req.path) {
-        for (const [x, y, z] of req.path) {
-          const key = `${x},${y},${z}`;
-          const count = (map.get(key) ?? 0) + 1;
-          map.set(key, count);
-          if (count > maxUsage) maxUsage = count;
+  const traffic = cumulativeTraffic.value;
+  if (colorMode.value === 'traffic' && traffic && traffic.length > 0) {
+    for (const layer of traffic) {
+      if (!layer) continue;
+      for (const row of layer) {
+        if (!row) continue;
+        for (const val of row) {
+          if (val > maxUsage) maxUsage = val;
         }
       }
     }
   }
-  return { map, maxUsage };
+  return { traffic, maxUsage };
 });
 
 // Request paths for visualization
@@ -121,7 +123,7 @@ function buildScene() {
 
   // Create per-layer instanced meshes
   const boxGeom = new THREE.BoxGeometry(1, 1, 1);
-  const lambertMat = new THREE.MeshLambertMaterial({ vertexColors: true, toneMapped: false });
+  const lambertMat = new THREE.MeshLambertMaterial({ toneMapped: false });
   layerMeshes = [];
   for (let z = 0; z < layers; z++) {
     const count = size * size;
@@ -131,9 +133,13 @@ function buildScene() {
   }
 
   // Grid frame
-  const gridFrameGeom = new THREE.BufferGeometry();
-  const gridFrameMat = new THREE.LineBasicMaterial({ color: '#333333', transparent: true, opacity: 0.5 });
-  gridFrame = new THREE.LineSegments(gridFrameGeom, gridFrameMat);
+  const lineGeom = new LineSegmentsGeometry();
+  const lineMat = new LineMaterial({
+    color: 0xffffff,
+    linewidth: 3,
+  });
+  lineMat.resolution.set(el.clientWidth, el.clientHeight);
+  gridFrame = new LineSegments2(lineGeom, lineMat);
   scene.add(gridFrame);
 
   // Paths group
@@ -157,6 +163,7 @@ function buildScene() {
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
     renderer.setSize(w, h);
+    if (gridFrame) (gridFrame.material as LineMaterial).resolution.set(w, h);
   });
   resizeObserver.observe(el);
 }
@@ -199,8 +206,8 @@ function updateGridFrame() {
   }
 
   gridFrame.geometry.dispose();
-  const geom = new THREE.BufferGeometry();
-  geom.setAttribute('position', new THREE.BufferAttribute(new Float32Array(pts), 3));
+  const geom = new LineSegmentsGeometry();
+  geom.setPositions(pts);
   gridFrame.geometry = geom;
 }
 
@@ -209,26 +216,29 @@ function updateLayerMeshes() {
 
   const size = gridSize.value;
   const colorFn = useColorScale(colorMode.value);
-  const { map: tMap, maxUsage } = trafficMap.value;
+  const { traffic, maxUsage } = trafficMap.value;
 
   for (let z = 0; z < layerMeshes.length; z++) {
-    const mesh = layerMeshes[z];
+    const mesh = layerMeshes[z]!;
     const layer = tsvGrid.value[z];
     if (!layer) continue;
 
     let i = 0;
     for (let y = 0; y < size; y++) {
+      const row = layer[y];
+      if (!row) continue;
       for (let x = 0; x < size; x++) {
-        const tsv = layer[y][x];
+        const tsv = row[x];
+        if (!tsv) { i++; continue; }
         dummy.position.set(x - size / 2 + 0.5, z * layerSpacing, y - size / 2 + 0.5);
         dummy.scale.set(0.8, 0.3, 0.8);
         dummy.updateMatrix();
         mesh.setMatrixAt(i, dummy.matrix);
 
-        const usage = (colorMode.value === 'traffic' && tMap)
-          ? (tMap.get(`${x},${y},${z}`) ?? 0)
+        const usage = (colorMode.value === 'traffic' && traffic && traffic[z])
+          ? (traffic[z]![y]?.[x] ?? 0)
           : tsv.usageCount;
-        const [r, g, b] = colorFn.value({ ...tsv, usageCount: usage }, maxUsage);
+        const [r, g, b] = colorFn.value({ ...tsv, usageCount: usage } as any, maxUsage);
         tempColor.setRGB(r, g, b);
         mesh.setColorAt(i, tempColor);
         i++;
@@ -236,6 +246,7 @@ function updateLayerMeshes() {
     }
     mesh.instanceMatrix.needsUpdate = true;
     if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    (mesh.material as THREE.Material).needsUpdate = true;
   }
 }
 
@@ -321,6 +332,8 @@ onBeforeUnmount(() => {
 watch([config], () => {
   if (isVisible.value && config.value && tsvGrid.value && canvasContainer.value) {
     buildScene();
+  } else if (!isVisible.value && scene) {
+    disposeScene();
   }
 });
 
@@ -366,7 +379,7 @@ watch(
       shouldUpdate = true;
     } else if (lastUpdate && lastUpdate.events.newFailures.length > 0) {
       shouldUpdate = true;
-    } else if (colorMode.value === 'traffic' && lastUpdate?.updateVisuals) {
+    } else if (lastUpdate?.updateVisuals) {
       shouldUpdate = true;
     }
 

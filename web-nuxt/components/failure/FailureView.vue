@@ -138,12 +138,6 @@ const redundancyChartData = computed(() => {
         backgroundColor: '#ef4444',
         borderRadius: 2,
       },
-      {
-        label: 'Failed Redundant',
-        data: sorted.map(r => r.failedRedundant),
-        backgroundColor: '#f97316',
-        borderRadius: 2,
-      },
     ],
   };
 });
@@ -334,11 +328,7 @@ function updateFailureMesh() {
         }
 
         if (columnFailed) {
-          if (tsv.redundant) {
-            tempColor.setRGB(0.7, 0.2, 0.9);   // purple — failed redundant
-          } else {
-            tempColor.setRGB(1.0, 0.15, 0.15);  // red — failed normal
-          }
+          tempColor.setRGB(1.0, 0.15, 0.15);  // red — failed
         } else {
           if (tsv.redundant) {
             tempColor.setRGB(0.27, 0.53, 1.0);  // blue — healthy redundant
@@ -404,6 +394,8 @@ onBeforeUnmount(() => {
 watch([config], () => {
   if (isVisible.value && config.value && tsvGrid.value && canvasContainer.value) {
     buildScene();
+  } else if (!isVisible.value && scene) {
+    disposeScene();
   }
 });
 
@@ -453,13 +445,14 @@ watch(
   <div v-if="!tsvGrid || !config" class="flex items-center justify-center h-full text-gray-500">
     Start a simulation to see failure analysis
   </div>
-  <div v-else class="grid grid-cols-2 grid-rows-2 gap-2 p-2 h-full">
-    <!-- Failure Map (3D) -->
-    <div class="bg-gray-800/30 rounded-lg border border-gray-700/30 overflow-hidden relative">
-      <div class="px-3 py-2 text-sm font-medium text-gray-300 border-b border-gray-700/30 relative z-10">
+  <div v-else class="absolute inset-0 overflow-y-auto">
+    <!-- Failure Map (3D) — fills visible quadrant -->
+    <div class="h-full relative">
+      <div ref="canvasContainer" class="absolute inset-0" />
+      <!-- Title overlay -->
+      <div class="absolute top-0 left-0 right-0 px-3 py-2 text-sm font-medium text-gray-300 z-10 bg-gray-900/80">
         Failure Map ({{ failedTSVPositions.length }} failed TSVs)
       </div>
-      <div ref="canvasContainer" class="absolute left-0 right-0 bottom-0 top-8" />
       <!-- Legend -->
       <div class="absolute bottom-2 left-2 z-10 bg-gray-900/80 rounded px-2 py-1.5 text-xs space-y-1">
         <div class="flex items-center gap-1.5">
@@ -474,30 +467,29 @@ watch(
           <span class="inline-block w-3 h-3 rounded-sm" style="background: rgb(255, 38, 38)" />
           <span class="text-gray-300">Failed</span>
         </div>
-        <div class="flex items-center gap-1.5">
-          <span class="inline-block w-3 h-3 rounded-sm" style="background: rgb(179, 51, 230)" />
-          <span class="text-gray-300">Failed Redundant</span>
+      </div>
+    </div>
+
+    <!-- Charts -->
+    <div class="space-y-2 p-2">
+      <!-- Failure Timeline -->
+      <div class="bg-gray-800/30 rounded-lg p-3 border border-gray-700/30">
+        <h3 class="text-sm font-medium text-gray-300 mb-2">Failure Timeline</h3>
+        <div v-if="failureTimelineChartData" style="height: 180px">
+          <Line :data="failureTimelineChartData" :options="failureTimelineOptions" />
         </div>
+        <div v-else class="text-xs text-gray-500 text-center py-8">No failures yet</div>
+        <div class="mt-2 text-xs text-gray-500">Cumulative TSV failures over simulation cycles</div>
       </div>
-    </div>
 
-    <!-- Failure Timeline -->
-    <div class="bg-gray-800/30 rounded-lg p-3 border border-gray-700/30">
-      <h3 class="text-sm font-medium text-gray-300 mb-2">Failure Timeline</h3>
-      <div v-if="failureTimelineChartData" style="height: 180px">
-        <Line :data="failureTimelineChartData" :options="failureTimelineOptions" />
+      <!-- Failures by Region -->
+      <div class="bg-gray-800/30 rounded-lg p-3 border border-gray-700/30">
+        <h3 class="text-sm font-medium text-gray-300 mb-2">Failures by Region</h3>
+        <div v-if="redundancyChartData" style="height: 180px">
+          <Bar :data="redundancyChartData" :options="redundancyChartOptions" />
+        </div>
+        <div v-else class="text-xs text-gray-500 text-center py-8">No failures in any region</div>
       </div>
-      <div v-else class="text-xs text-gray-500 text-center py-8">No failures yet</div>
-      <div class="mt-2 text-xs text-gray-500">Cumulative TSV failures over simulation cycles</div>
-    </div>
-
-    <!-- Failures by Region -->
-    <div class="bg-gray-800/30 rounded-lg p-3 border border-gray-700/30 col-span-2">
-      <h3 class="text-sm font-medium text-gray-300 mb-2">Failures by Region</h3>
-      <div v-if="redundancyChartData" style="height: 180px">
-        <Bar :data="redundancyChartData" :options="redundancyChartOptions" />
-      </div>
-      <div v-else class="text-xs text-gray-500 text-center py-8">No failures in any region</div>
     </div>
   </div>
 </template>

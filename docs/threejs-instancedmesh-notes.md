@@ -59,7 +59,7 @@ if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
 
 ### Note on Grid3DView
 
-Grid3DView currently uses `vertexColors: true` with `setColorAt()` and still renders correctly. This may be due to Three.js version-specific behavior or material cloning (`lambertMat.clone()`). However, this is fragile and may break on Three.js upgrades. The pattern above (without `vertexColors`) is the recommended approach.
+Grid3DView previously used `vertexColors: true` with `setColorAt()`, which caused all instances to render black. This was fixed by removing `vertexColors: true` and adding `material.needsUpdate = true` — the same pattern used in FailureView and HeatmapView.
 
 ## References
 
