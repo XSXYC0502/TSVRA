@@ -194,7 +194,7 @@ export const useSimulationStore = defineStore('simulation', () => {
     hotspotWeights.value = hsWeights;
     failedTSVPositions.value = positions;
     totalCycles.value = msgConfig.totalCycles;
-    simStatus.value = 'running';
+    simStatus.value = speedMode.value === 'step' ? 'stepping' : 'running';
     activeRequests.value = new Map();
     completedCount.value = 0;
     failedCount.value = 0;

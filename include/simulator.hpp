@@ -82,7 +82,7 @@ private:
     // JSON streaming mode
     bool json_stream_mode_;
     bool paused_;
-    bool stepping_;
+    int steps_remaining_;
     bool stop_requested_;
 
     // Per-cycle event accumulators

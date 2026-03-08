@@ -4,12 +4,58 @@ import type { SpeedMode } from '~/types/simulation';
 
 let ws: WebSocket | null = null;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+let ackTimer: ReturnType<typeof setTimeout> | null = null;
 
 export const wsConnected = ref(false);
 
+// Lockstep flow control: batch sizes and delays per speed mode
+const ACK_BATCH: Record<SpeedMode, number> = {
+  high: 100,
+  medium: 1,
+  slow: 1,
+  auto: 1,
+  step: 1,
+};
+
+const ACK_DELAY: Record<SpeedMode, number> = {
+  high: 0,
+  medium: 10,
+  slow: 50,
+  auto: 0,
+  step: Infinity, // manual — never auto-ack
+};
+
+let cyclesSinceAck = 0;
+
 function send(msg: object): void {
-  if (ws?.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify(msg));
+  const ready = ws?.readyState === WebSocket.OPEN;
+  if (ready) {
+    ws!.send(JSON.stringify(msg));
+  }
+}
+
+function sendAck(count: number): void {
+  send({ type: 'ack', count });
+}
+
+function scheduleAck(mode: SpeedMode, keyEvent: boolean): void {
+  if (ackTimer) {
+    clearTimeout(ackTimer);
+    ackTimer = null;
+  }
+
+  const batch = ACK_BATCH[mode];
+  const delay = (mode === 'auto' && keyEvent) ? 500 : ACK_DELAY[mode];
+
+  if (delay === Infinity) return; // step mode: wait for manual ack
+
+  if (delay > 0) {
+    ackTimer = setTimeout(() => {
+      ackTimer = null;
+      sendAck(batch);
+    }, delay);
+  } else {
+    sendAck(batch);
   }
 }
 
@@ -46,27 +92,56 @@ export function connect(): void {
       const msg = JSON.parse(event.data);
       const store = useSimulationStore();
 
+      if (msg.type === 'cycle') {
+        if (msg.cycle % 100 === 0) {
+          console.log(`[WS-CLIENT] recv: cycle ${msg.cycle}`);
+        }
+      } else {
+        console.log(`[WS-CLIENT] recv: ${msg.type}`, msg.type === 'stderr' ? '' : JSON.stringify(msg).slice(0, 200));
+      }
+
       switch (msg.type) {
         case 'init':
           store.applyInitMessage(msg);
+          // Lockstep: ack init to trigger first batch of cycles
+          cyclesSinceAck = 0;
+          sendAck(ACK_BATCH[store.speedMode]);
           break;
+
         case 'cycle':
+          if (store.simStatus === 'paused') break;
+
           store.applyCycleUpdate(msg);
+
+          // Lockstep: ack after processing a batch
+          if (store.speedMode !== 'step') {
+            cyclesSinceAck++;
+            const batch = ACK_BATCH[store.speedMode];
+            if (cyclesSinceAck >= batch) {
+              cyclesSinceAck = 0;
+              scheduleAck(store.speedMode, msg.keyEvent === true);
+            }
+          }
           break;
+
         case 'done':
           store.applyDoneMessage(msg);
           break;
+
         case 'process_exit':
           if (store.simStatus !== 'done') {
             store.setSimStatus('idle');
           }
           break;
+
         case 'error':
           store.setError({ code: msg.code, message: msg.message });
           break;
+
         case 'status':
           store.setBinaryStatus(msg.binaryAvailable, msg.binaryPath);
           break;
+
         case 'stderr':
           store.addStderrLine(msg.line);
           break;
@@ -79,6 +154,7 @@ export function connect(): void {
 
 export function disconnect(): void {
   if (reconnectTimer) clearTimeout(reconnectTimer);
+  if (ackTimer) clearTimeout(ackTimer);
   ws?.close();
   ws = null;
 }
@@ -96,31 +172,49 @@ export function start(config: {
   const store = useSimulationStore();
   store.clearError();
   store.setSimStatus('running');
+  cyclesSinceAck = 0;
+  if (ackTimer) { clearTimeout(ackTimer); ackTimer = null; }
   send({ type: 'start', config });
 }
 
 export function pause(): void {
   send({ type: 'pause' });
-  useSimulationStore().setSimStatus('paused');
+  const store = useSimulationStore();
+  store.setSimStatus('paused');
+  cyclesSinceAck = 0;
+  if (ackTimer) { clearTimeout(ackTimer); ackTimer = null; }
 }
 
 export function resume(): void {
   send({ type: 'resume' });
-  useSimulationStore().setSimStatus('running');
+  const store = useSimulationStore();
+  store.setSimStatus('running');
+  // Server kick-starts with one 'n'; browser resumes acking on next cycle
 }
 
 export function stop(): void {
   send({ type: 'stop' });
+  useSimulationStore().setSimStatus('idle');
+  cyclesSinceAck = 0;
+  if (ackTimer) { clearTimeout(ackTimer); ackTimer = null; }
 }
 
 export function step(): void {
-  send({ type: 'step' });
+  // In lockstep, step = send one ack credit
+  sendAck(1);
   useSimulationStore().setSimStatus('stepping');
 }
 
 export function setSpeed(mode: SpeedMode): void {
-  send({ type: 'speed', mode });
-  useSimulationStore().setSpeedMode(mode);
+  const store = useSimulationStore();
+  const wasStep = store.speedMode === 'step';
+  store.setSpeedMode(mode);
+
+  // If leaving step mode while running, send an ack to kick-start
+  if (wasStep && mode !== 'step' && store.simStatus !== 'idle' && store.simStatus !== 'done' && store.simStatus !== 'paused') {
+    cyclesSinceAck = 0;
+    sendAck(ACK_BATCH[mode]);
+  }
 }
 
 export function useWebSocket() {

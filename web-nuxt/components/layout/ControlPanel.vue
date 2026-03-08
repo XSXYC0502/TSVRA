@@ -22,6 +22,24 @@ const speedOptions: { key: SpeedMode; label: string }[] = [
   <aside class="w-72 bg-gray-900 border-l border-gray-800 overflow-y-auto p-4 flex flex-col gap-4">
     <SimConfigForm v-if="simStatus === 'idle' || simStatus === 'configuring'" />
 
+    <!-- Speed control — visible before and during simulation -->
+    <div v-if="simStatus !== 'configuring' && simStatus !== 'done'">
+      <label class="text-xs text-gray-400 mb-1 block">Speed</label>
+      <div class="flex gap-1">
+        <button
+          v-for="s in speedOptions"
+          :key="s.key"
+          :class="[
+            'px-2 py-1 rounded text-xs font-medium',
+            speedMode === s.key ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
+          ]"
+          @click="ws.setSpeed(s.key)"
+        >
+          {{ s.label }}
+        </button>
+      </div>
+    </div>
+
     <template v-if="simStatus !== 'idle' && simStatus !== 'configuring'">
       <!-- Control buttons -->
       <div class="flex flex-wrap gap-2">
@@ -47,7 +65,7 @@ const speedOptions: { key: SpeedMode; label: string }[] = [
           Stop
         </button>
         <button
-          v-if="simStatus === 'paused' || simStatus === 'stepping'"
+          v-if="simStatus === 'paused' || simStatus === 'stepping' || (simStatus === 'running' && speedMode === 'step')"
           class="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 rounded text-sm font-medium"
           @click="ws.step()"
         >
@@ -60,24 +78,6 @@ const speedOptions: { key: SpeedMode; label: string }[] = [
         >
           Reset
         </button>
-      </div>
-
-      <!-- Speed control -->
-      <div v-if="simStatus !== 'done'">
-        <label class="text-xs text-gray-400 mb-1 block">Speed</label>
-        <div class="flex gap-1">
-          <button
-            v-for="s in speedOptions"
-            :key="s.key"
-            :class="[
-              'px-2 py-1 rounded text-xs font-medium',
-              speedMode === s.key ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
-            ]"
-            @click="ws.setSpeed(s.key)"
-          >
-            {{ s.label }}
-          </button>
-        </div>
       </div>
 
       <!-- Heatmap update interval -->

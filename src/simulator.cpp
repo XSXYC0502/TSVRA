@@ -19,7 +19,7 @@ Simulator::Simulator(const Config& config)
       current_cycle_(0),
       json_stream_mode_(config.get_json_stream()),
       paused_(false),
-      stepping_(false),
+      steps_remaining_(0),
       stop_requested_(false) {
 }
 
@@ -81,20 +81,18 @@ void Simulator::poll_stdin_commands() {
         switch (ch) {
             case 'p':
                 paused_ = true;
-                stepping_ = false;
+                steps_remaining_ = 0;
                 break;
             case 'r':
                 paused_ = false;
-                stepping_ = false;
                 break;
             case 's':
                 stop_requested_ = true;
                 paused_ = false;
-                stepping_ = false;
+                steps_remaining_ = 0;
                 break;
             case 'n':
-                // advance one cycle then pause
-                stepping_ = true;
+                steps_remaining_++;
                 paused_ = false;
                 break;
             default:
@@ -373,10 +371,11 @@ void Simulator::run() {
             emit_cycle_json();
             reset_cycle_accumulators();
 
-            // If stepping mode, pause after this cycle
-            if (stepping_) {
+            // Lockstep: decrement credit, pause when exhausted
+            if (steps_remaining_ > 0) {
+                steps_remaining_--;
+            } else {
                 paused_ = true;
-                stepping_ = false;
             }
         }
 

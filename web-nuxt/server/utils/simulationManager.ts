@@ -130,6 +130,9 @@ export class SimulationManager {
   }
 
   sendCommand(cmd: string): void {
+    const writable = this.process?.stdin?.writable ?? false;
+    const pid = this.process?.pid ?? null;
+    console.log(`[SIM-MGR] sendCommand('${cmd}') | pid=${pid} writable=${writable}`);
     if (this.process?.stdin?.writable) {
       this.process.stdin.write(cmd);
     }
@@ -152,6 +155,8 @@ export class SimulationManager {
   }
 
   kill(): void {
+    const pid = this.process?.pid ?? null;
+    console.log(`[SIM-MGR] kill() | pid=${pid}`);
     if (this.process) {
       this.process.kill('SIGTERM');
       this.process = null;

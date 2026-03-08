@@ -1,21 +1,12 @@
 import type { Peer } from 'crossws';
 import { SimulationManager, type SimConfig } from '../utils/simulationManager';
 
-type SpeedMode = 'slow' | 'medium' | 'high' | 'auto' | 'step';
-
-const SPEED_DELAYS: Record<string, number> = {
-  slow: 500,
-  medium: 100,
-  high: 10,
-  auto: 10,
-};
-
 interface ClientState {
   sim: SimulationManager | null;
-  speedMode: SpeedMode;
-  messageQueue: unknown[];
-  forwardTimer: ReturnType<typeof setInterval> | null;
-  pendingStep: boolean;
+  initReceived: boolean;
+  paused: boolean;
+  cppFinished: boolean;
+  stopped: boolean;
 }
 
 const clientStates = new WeakMap<Peer, ClientState>();
@@ -25,74 +16,14 @@ function getState(peer: Peer): ClientState {
   if (!state) {
     state = {
       sim: null,
-      speedMode: 'high',
-      messageQueue: [],
-      forwardTimer: null,
-      pendingStep: false,
+      initReceived: false,
+      paused: false,
+      cppFinished: false,
+      stopped: false,
     };
     clientStates.set(peer, state);
   }
   return state;
-}
-
-function startForwarding(peer: Peer, state: ClientState): void {
-  stopForwarding(state);
-
-  if (state.speedMode === 'step') {
-    return;
-  }
-
-  // High mode: forward immediately in onMessage callback, no timer needed
-  if (state.speedMode === 'high') {
-    return;
-  }
-
-  const delay = SPEED_DELAYS[state.speedMode] ?? 10;
-
-  state.forwardTimer = setInterval(() => {
-    // Drain up to 10 messages per tick for better throughput
-    let count = 0;
-    while (state.messageQueue.length > 0 && count < 10) {
-      const msg = state.messageQueue.shift()!;
-      peer.send(JSON.stringify(msg));
-      count++;
-    }
-
-    // In auto mode, slow down when there's a key event
-    if (state.speedMode === 'auto' && count > 0 && isKeyEvent(state.messageQueue[0])) {
-      stopForwarding(state);
-      setTimeout(() => {
-        if (state.speedMode === 'auto') {
-          startForwarding(peer, state);
-        }
-      }, 500);
-    }
-  }, delay);
-}
-
-function stopForwarding(state: ClientState): void {
-  if (state.forwardTimer !== null) {
-    clearInterval(state.forwardTimer);
-    state.forwardTimer = null;
-  }
-}
-
-function isKeyEvent(msg: unknown): boolean {
-  if (typeof msg === 'object' && msg !== null) {
-    const record = msg as Record<string, unknown>;
-    return record['keyEvent'] === true;
-  }
-  return false;
-}
-
-function forwardStepMessage(peer: Peer, state: ClientState): void {
-  if (state.messageQueue.length === 0) {
-    state.pendingStep = true;
-    return;
-  }
-
-  const msg = state.messageQueue.shift()!;
-  peer.send(JSON.stringify(msg));
 }
 
 function sendErrorToPeer(peer: Peer, code: string, message: string): void {
@@ -104,7 +35,6 @@ function sendErrorToPeer(peer: Peer, code: string, message: string): void {
 }
 
 function checkBinaryAvailability(): { available: boolean; path: string | null } {
-  // Create a temporary manager just to check the binary path
   const tmpMgr = new SimulationManager(() => {}, () => {}, () => {}, () => {});
   const binPath = tmpMgr.getBinPath();
   return { available: binPath !== null, path: binPath };
@@ -115,7 +45,6 @@ export default defineWebSocketHandler({
     console.log('WebSocket client connected');
     getState(peer);
 
-    // Send binary health check on connect
     const { available, path: binPath } = checkBinaryAvailability();
     peer.send(JSON.stringify({
       type: 'status',
@@ -136,38 +65,56 @@ export default defineWebSocketHandler({
 
     switch (parsed.type) {
       case 'start': {
+        console.log(`[WS-SRV] <<< start`);
         if (state.sim?.isRunning()) {
+          console.log(`[WS-SRV] killing previous sim`);
           state.sim.kill();
         }
-        stopForwarding(state);
-        state.messageQueue = [];
+        state.initReceived = false;
+        state.paused = false;
+        state.cppFinished = false;
+        state.stopped = false;
 
         const onMessage = (msg: unknown): void => {
-          if (state.speedMode === 'step') {
-            state.messageQueue.push(msg);
-            if (state.pendingStep) {
-              state.pendingStep = false;
-              forwardStepMessage(peer, state);
-            }
-            return;
-          }
+          if (state.stopped) return;
 
-          // High mode: forward immediately, bypass queue
-          if (state.speedMode === 'high') {
+          const record = msg as Record<string, unknown>;
+          const msgType = record['type'] as string;
+
+          // init message: always forward immediately
+          if (msgType === 'init') {
+            console.log(`[WS-SRV] onMessage: init → forwarding`);
+            state.initReceived = true;
             peer.send(JSON.stringify(msg));
             return;
           }
 
-          state.messageQueue.push(msg);
+          // done message: always forward immediately
+          if (msgType === 'done') {
+            console.log(`[WS-SRV] onMessage: done → forwarding`);
+            state.cppFinished = true;
+            peer.send(JSON.stringify(msg));
+            return;
+          }
+
+          // cycle messages: discard if paused, forward otherwise
+          if (state.paused) return;
+
+          const cycle = (record['cycle'] as number) ?? '?';
+          if (typeof cycle === 'number' && (cycle <= 3 || cycle % 1000 === 0)) {
+            console.log(`[WS-SRV] onMessage: cycle ${cycle} → forward`);
+          }
+          peer.send(JSON.stringify(msg));
         };
 
         const onExit = (code: number | null): void => {
-          // Flush remaining messages
-          for (const msg of state.messageQueue) {
-            peer.send(JSON.stringify(msg));
+          console.log(`[WS-SRV] onExit: code=${code} stopped=${state.stopped}`);
+          state.cppFinished = true;
+
+          if (state.stopped) {
+            state.sim = null;
+            return;
           }
-          state.messageQueue = [];
-          stopForwarding(state);
 
           peer.send(JSON.stringify({ type: 'process_exit', code }));
           state.sim = null;
@@ -188,50 +135,45 @@ export default defineWebSocketHandler({
 
         state.sim = new SimulationManager(onMessage, onExit, onError, onStderr);
         state.sim.start(parsed.config as SimConfig);
-        startForwarding(peer, state);
+
+        // Lockstep: always pause C++ immediately so it waits for browser ack
+        console.log(`[WS-SRV] start: sending immediate 'p' (lockstep)`);
+        state.sim.pause();
+        break;
+      }
+
+      case 'ack': {
+        const count = (parsed.count as number) || 1;
+        if (!state.paused && !state.cppFinished && state.sim) {
+          state.sim.sendCommand('n'.repeat(count));
+        }
         break;
       }
 
       case 'pause': {
+        console.log(`[WS-SRV] <<< pause`);
+        state.paused = true;
+        // C++ is already paused (lockstep) or will pause after current cycle
         state.sim?.pause();
         break;
       }
 
       case 'resume': {
-        state.sim?.resume();
+        console.log(`[WS-SRV] <<< resume`);
+        state.paused = false;
+        // Kick-start: send one 'n' so C++ advances and emits next cycle
+        if (!state.cppFinished && state.sim) {
+          state.sim.step();
+        }
         break;
       }
 
       case 'stop': {
-        state.sim?.stop();
-        break;
-      }
-
-      case 'step': {
-        if (state.speedMode === 'step') {
-          forwardStepMessage(peer, state);
-        }
-        state.sim?.step();
-        break;
-      }
-
-      case 'speed': {
-        const mode = parsed.mode as SpeedMode;
-        if (['slow', 'medium', 'high', 'auto', 'step'].includes(mode)) {
-          state.speedMode = mode;
-          stopForwarding(state);
-
-          // Flush queued messages when switching to high mode
-          if (mode === 'high') {
-            for (const msg of state.messageQueue) {
-              peer.send(JSON.stringify(msg));
-            }
-            state.messageQueue = [];
-          }
-
-          if (mode !== 'step') {
-            startForwarding(peer, state);
-          }
+        console.log(`[WS-SRV] <<< stop | sim=${!!state.sim} cppFinished=${state.cppFinished}`);
+        state.stopped = true;
+        if (state.sim) {
+          state.sim.kill();
+          state.sim = null;
         }
         break;
       }
@@ -245,11 +187,8 @@ export default defineWebSocketHandler({
   close(peer) {
     console.log('WebSocket client disconnected');
     const state = clientStates.get(peer);
-    if (state) {
-      stopForwarding(state);
-      if (state.sim?.isRunning()) {
-        state.sim.kill();
-      }
+    if (state?.sim?.isRunning()) {
+      state.sim.kill();
     }
   },
 
