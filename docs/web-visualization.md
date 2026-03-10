@@ -10,9 +10,9 @@ Browser (Nuxt 4 SPA / Vue 3)  ←WebSocket→  Nitro Server  ←stdout JSON→  
 
 **Data flow:**
 1. User configures params in web UI → WebSocket → Nitro server → spawns `bin/tsvra --json-stream ...`
-2. C++ writes JSON lines to stdout every N cycles (batch updates)
-3. Nitro server reads stdout line-by-line → forwards each JSON batch via WebSocket
-4. Vue app receives batches → updates Pinia store → renders all views in real-time
+2. C++ writes one JSON line per simulation cycle to stdout
+3. Nitro server reads stdout line-by-line → forwards each JSON message via WebSocket
+4. Vue app receives messages → sends ack credits to control pacing → updates Pinia store → renders all views in real-time
 
 **Tech stack:** Nuxt 4.3 (SPA mode) | Vue 3 | Pinia | Raw Three.js (InstancedMesh) | Chart.js + vue-chartjs | Tailwind CSS 4 | Nitro WebSocket (crossws)
 
@@ -44,7 +44,6 @@ This protocol is the integration point for external hardware design tools. Any t
 | Flag | Description | Default |
 |------|-------------|---------|
 | `--json-stream` | Enable JSON line output to stdout (disables CSV) | off |
-| `--batch-size N` | Cycles per batch update | 10000 |
 | `--layers N` | Number of chip layers | 2 |
 | `--grid-factor N` | Grid factor (grid size = 4 × N) | 4 |
 | `--failure-mode a\|b\|c` | Failure mode: initial/runtime/combined | c |
@@ -67,19 +66,19 @@ This protocol is the integration point for external hardware design tools. Any t
 }
 ```
 
-**Batch** (sent every N cycles):
+**Cycle** (sent every simulation cycle):
 ```json
 {
-  "type": "batch",
-  "cycle": 10000,
+  "type": "cycle",
+  "cycle": 500,
   "events": {
-    "newRequests": [{ "id": 30, "sx": 3, "sy": 3, "sz": 0, "ex": 3, "ey": 3, "ez": 1, "time": 2393, "path": [[3,3,0],[3,3,1]] }],
-    "completed": [{ "id": 30, "time": 2395, "latency": 2 }],
-    "failed": [{ "id": 99, "time": 5000, "reason": "no_route" }],
-    "newFailures": [{ "x": 7, "y": 2, "z": 1, "cycle": 9500 }],
+    "newRequests": [{ "id": 30, "sx": 3, "sy": 3, "sz": 0, "ex": 3, "ey": 3, "ez": 1, "time": 500, "path": [[3,3,0],[3,3,1]] }],
+    "completed": [{ "id": 30, "time": 502, "latency": 2 }],
+    "failed": [{ "id": 99, "time": 500, "reason": "no_route" }],
+    "newFailures": [{ "x": 7, "y": 2, "z": 1, "cycle": 500 }],
     "reroutes": [{ "requestId": 45, "oldPath": [...], "newPath": [...], "redundantUsed": { "x": 4, "y": 0, "z": 1 } }]
   },
-  "stats": { "pending": 5, "transmitting": 23, "completed": 2487, "failed": 0, "failedTSVs": 3, "avgLatency": 10642, "redundantUsages": 1 },
+  "stats": { "pending": 5, "transmitting": 23, "completed": 487, "failed": 0, "failedTSVs": 3, "avgLatency": 1042, "redundantUsages": 1 },
   "keyEvent": false
 }
 ```
@@ -92,33 +91,33 @@ This protocol is the integration point for external hardware design tools. Any t
 }
 ```
 
-### stdin Commands
+### stdin Commands (Lockstep Protocol)
 
-The C++ process reads single-character commands from stdin (non-blocking poll):
-- `p` — Pause simulation
-- `r` — Resume simulation
+The C++ process is started in **paused** mode. The Nitro server controls pacing by sending `n` (step) commands — one per cycle. Single-character commands are read via non-blocking poll:
+- `p` — Pause simulation (clears remaining step credits)
+- `r` — Resume free-running mode (unused in lockstep)
 - `s` — Stop simulation (graceful, produces `done` message)
-- `n` — Advance one batch (step mode)
+- `n` — Advance one cycle then pause (the lockstep primitive)
 
 ### keyEvent Flag
 
-Set to `true` when the batch contains notable events (TSV failure, request failure, reroute). Drives the "auto" speed mode — the frontend automatically slows down to highlight important events.
+Set to `true` when the cycle contains notable events (TSV failure, request failure, reroute). Drives the "auto" speed mode — the frontend automatically inserts a 500ms delay to highlight important events.
 
 ### Usage Examples
 
 **Simple run with JSON output:**
 ```bash
-./bin/tsvra --json-stream --layers 2 --grid-factor 4 --cycles 10000 --batch-size 1000
+./bin/tsvra --json-stream --layers 2 --grid-factor 4 --cycles 10000
 ```
 
 **Pipe to analysis tool:**
 ```bash
-./bin/tsvra --json-stream --batch-size 5000 --cycles 50000 | python3 analyze.py
+./bin/tsvra --json-stream --cycles 50000 | python3 analyze.py
 ```
 
 **Validate output:**
 ```bash
-./bin/tsvra --json-stream --batch-size 1000 --cycles 5000 --layers 2 --grid-factor 2 2>/dev/null \
+./bin/tsvra --json-stream --cycles 5000 --layers 2 --grid-factor 2 2>/dev/null \
   | while IFS= read -r line; do echo "$line" | python3 -m json.tool > /dev/null && echo "OK" || echo "FAIL"; done
 ```
 
@@ -135,7 +134,7 @@ for line in proc.stdout:
     msg = json.loads(line)
     if msg['type'] == 'init':
         grid_size = msg['config']['gridSize']
-    elif msg['type'] == 'batch':
+    elif msg['type'] == 'cycle':
         print(f"Cycle {msg['cycle']}: {msg['stats']['completed']} completed")
     elif msg['type'] == 'done':
         print(f"Final success rate: {msg['summary']['successRate']}%")
@@ -150,7 +149,7 @@ for line in proc.stdout:
 |------|-------------|
 | `{ type: "status", binaryAvailable, binaryPath }` | Sent on connect: binary health check |
 | `{ type: "init", ... }` | Forwarded C++ init message |
-| `{ type: "batch", ... }` | Forwarded C++ batch message |
+| `{ type: "cycle", ... }` | Forwarded C++ cycle message |
 | `{ type: "done", ... }` | Forwarded C++ done message |
 | `{ type: "error", code, message }` | Error: `binary_not_found`, `spawn_failed` |
 | `{ type: "stderr", line }` | C++ stderr output (debug info) |
@@ -160,24 +159,26 @@ for line in proc.stdout:
 
 | Command | Action |
 |---------|--------|
-| `{ type: "start", config: {...} }` | Spawn C++ process with config |
-| `{ type: "pause" }` | Send `p` to C++ stdin |
-| `{ type: "resume" }` | Send `r` to C++ stdin |
-| `{ type: "stop" }` | Send `s` to C++ stdin |
-| `{ type: "step" }` | Send `n` to C++ stdin |
-| `{ type: "speed", mode: "slow"|"medium"|"high"|"auto"|"step" }` | Change message forwarding rate |
+| `{ type: "start", config: {...} }` | Spawn C++ process with config; C++ is paused immediately (lockstep) |
+| `{ type: "ack", count: N }` | Grant N step credits — server sends N `n` commands to C++ stdin |
+| `{ type: "pause" }` | Set server paused state; send `p` to C++ stdin |
+| `{ type: "resume" }` | Clear server paused state; browser sends ack to kick-start |
+| `{ type: "stop" }` | Kill C++ process |
+| `{ type: "speed" }` | Flush old C++ step credits (sends `p` to stdin); browser follows with new ack |
 
-### Speed Control
+### Speed Control (Lockstep Ack Protocol)
 
-The server controls how fast it forwards batch messages to the browser:
+The browser controls simulation pacing via a **lockstep ack protocol**. C++ is always paused; the browser sends `ack` messages granting step credits. Two parameters per mode:
 
-| Mode | Delay between batches |
-|------|----------------------|
-| Step | Paused, manual advance |
-| Slow | ~500ms |
-| Medium | ~100ms |
-| High | ~10ms |
-| Auto | High speed; slows to ~500ms on `keyEvent: true` |
+| Mode | Batch (ack count) | Delay between acks |
+|------|-------------------|-------------------|
+| Step | 1 (manual only) | ∞ (wait for user click) |
+| Slow | 1 | 50ms |
+| Medium | 1 | 10ms |
+| High | 100 | 0ms (immediate) |
+| Auto | 1 | 0ms; 500ms on `keyEvent: true` |
+
+When switching speed, the browser sends `{ type: "speed" }` (which tells the server to send `p` to flush C++ credits), then a new ack with the target mode's batch size.
 
 ## Nitro Server
 
@@ -185,7 +186,7 @@ The server controls how fast it forwards batch messages to the browser:
 
 | File | Purpose |
 |------|---------|
-| `web-nuxt/server/api/_ws.ts` | WebSocket handler: message routing, speed control, message queueing |
+| `web-nuxt/server/api/_ws.ts` | WebSocket handler: message routing, lockstep ack→stdin translation |
 | `web-nuxt/server/utils/simulationManager.ts` | Spawns C++ process, reads JSON stdout, exposes command methods |
 
 ## Frontend (Vue 3 / Nuxt 4)
@@ -230,12 +231,12 @@ web-nuxt/
 
 ### State Management (Pinia)
 
-The store accumulates data from WebSocket batches:
+The store accumulates data from WebSocket cycle messages:
 - 3D grid array `tsvGrid[z][y][x]` updated with failures (in-place mutation + `triggerRef` for performance)
 - Active requests tracked in a Map, removed on completion/failure
 - Latency samples (capped at 10000) for histogram
 - Throughput timeline and failure timeline for charts
-- Running stats updated each batch
+- Running stats updated each cycle
 - Error state from server (binary not found, spawn failures)
 - Stderr log from C++ process
 
@@ -244,7 +245,7 @@ The store accumulates data from WebSocket batches:
 - **Binary health check**: Server sends `status` message on WebSocket connect; UI disables Start if binary unavailable
 - **Error banner**: Red banner with error code and message; dismiss button
 - **Loading indicator**: Spinner shown between Start click and first data
-- **Stale data warning**: "Waiting for data..." if no batch received for >5 seconds while running
+- **Stale data warning**: "Waiting for data..." if no cycle received for >5 seconds while running
 - **Stderr panel**: Collapsible debug panel showing C++ stderr output
 
 ### Simulation Lifecycle

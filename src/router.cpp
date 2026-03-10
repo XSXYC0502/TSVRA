@@ -115,8 +115,11 @@ std::optional<std::pair<std::vector<Point>, uint64_t>> Router::route(
                 continue;
             }
             
-            // 如果TSV失效，尝试使用冗余TSV绕行
-            if (tsv->is_failed()) {
+            // TSV仅连接相邻层，水平移动不使用TSV，因此不受TSV失效影响
+            bool is_vertical_move = (neighbor.z != current.position.z);
+
+            // 仅垂直移动需要检查TSV失效，水平移动跳过
+            if (is_vertical_move && tsv->is_failed()) {
                 auto redundant_opt = grid_.get_nearest_redundant_tsv(
                     neighbor.x, neighbor.y, neighbor.z, current_time);
                 if (!redundant_opt.has_value()) {

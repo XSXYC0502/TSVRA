@@ -11,10 +11,10 @@ Config::Config()
     : num_layers_(2),
       grid_factor_(4),
       failure_mode_(FailureMode::INITIAL_ONLY),
-      failure_rate_(1e-3),  // 调整为适合仿真的值（从1e-6调到1e-3）
+      failure_rate_(1e-6),
       vertical_delay_(1),
       horizontal_delay_(1000),
-      simulation_cycles_(100000),  // 默认仿真周期
+      simulation_cycles_(10000),
       output_prefix_("tsvra_output"),
       random_seed_(0),
       lambda1_(0.0),

@@ -64,7 +64,7 @@ const requestPathLines = computed(() => {
   const reqs = Array.from(activeRequests.value.values()).slice(0, 50);
   const half = gridSize.value / 2;
   return reqs
-    .filter(req => req.path && req.path.length >= 2)
+    .filter(req => req.rerouted && req.path && req.path.length >= 2)
     .map(req => {
       const pts = req.path.map(
         ([x, y, z]) => new THREE.Vector3(x - half + 0.5, z * layerSpacing + 0.2, y - half + 0.5)
@@ -383,7 +383,7 @@ watch(
       shouldUpdate = true;
     }
 
-    const shouldUpdatePaths = lastUpdate && lastUpdate.events.newRequests.length > 0;
+    const shouldUpdatePaths = lastUpdate && (lastUpdate.events.newRequests.length > 0 || lastUpdate.events.reroutes.length > 0);
     if (!shouldUpdate && !shouldUpdatePaths) return;
 
     if (updatePending) return;

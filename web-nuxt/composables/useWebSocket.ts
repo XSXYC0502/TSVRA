@@ -189,7 +189,12 @@ export function resume(): void {
   send({ type: 'resume' });
   const store = useSimulationStore();
   store.setSimStatus('running');
-  // Server kick-starts with one 'n'; browser resumes acking on next cycle
+  cyclesSinceAck = 0;
+  if (ackTimer) { clearTimeout(ackTimer); ackTimer = null; }
+  // Kick-start with current batch size
+  if (store.speedMode !== 'step') {
+    sendAck(ACK_BATCH[store.speedMode]);
+  }
 }
 
 export function stop(): void {
@@ -207,13 +212,20 @@ export function step(): void {
 
 export function setSpeed(mode: SpeedMode): void {
   const store = useSimulationStore();
-  const wasStep = store.speedMode === 'step';
   store.setSpeedMode(mode);
 
-  // If leaving step mode while running, send an ack to kick-start
-  if (wasStep && mode !== 'step' && store.simStatus !== 'idle' && store.simStatus !== 'done' && store.simStatus !== 'paused') {
-    cyclesSinceAck = 0;
-    sendAck(ACK_BATCH[mode]);
+  // Always clear pending ack state
+  if (ackTimer) { clearTimeout(ackTimer); ackTimer = null; }
+  cyclesSinceAck = 0;
+
+  // If simulation is active, flush old credits and kick-start new mode
+  const active = store.simStatus === 'running' || store.simStatus === 'stepping';
+  if (active) {
+    send({ type: 'speed' });          // server sends 'p' to C++ → flushes old steps_remaining_
+    if (mode !== 'step') {
+      store.setSimStatus('running');
+      sendAck(ACK_BATCH[mode]);       // kick-start with new batch size
+    }
   }
 }
 

@@ -161,9 +161,15 @@ export default defineWebSocketHandler({
       case 'resume': {
         console.log(`[WS-SRV] <<< resume`);
         state.paused = false;
-        // Kick-start: send one 'n' so C++ advances and emits next cycle
+        // Browser sends ack to kick-start; no server 'n' needed
+        break;
+      }
+
+      case 'speed': {
+        console.log(`[WS-SRV] <<< speed`);
+        // Flush: 'p' clears C++ steps_remaining_ to 0
         if (!state.cppFinished && state.sim) {
-          state.sim.step();
+          state.sim.pause();
         }
         break;
       }

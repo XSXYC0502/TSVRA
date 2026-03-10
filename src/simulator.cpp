@@ -662,11 +662,13 @@ void Simulator::update_transmitting_requests() {
                 continue;
             }
 
-            // 检查下一跳的TSV是否失效
+            // 检查下一跳的TSV是否失效（仅垂直移动需要检查，水平移动不使用TSV）
+            Point curr_pos = req.path[req.current_hop - 1];
             Point next_pos = req.path[req.current_hop];
+            bool is_vertical_move = (curr_pos.z != next_pos.z);
             TSV* next_tsv = grid_->get_tsv(next_pos.x, next_pos.y, next_pos.z);
 
-            if (next_tsv && next_tsv->is_failed()) {
+            if (is_vertical_move && next_tsv && next_tsv->is_failed()) {
                 // TSV失效，需要重新路由
                 decrement_path_usage(req.path);
                 if (reroute_request(req)) {

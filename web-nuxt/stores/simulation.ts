@@ -75,10 +75,10 @@ export const useSimulationStore = defineStore('simulation', () => {
       numLayers,
       gridFactor,
       failureMode: 'c',
-      failureRate: 0.001,
+      failureRate: 0.000001,
       verticalDelay: 1,
       horizontalDelay: 1000,
-      totalCycles: 100000,
+      totalCycles: 10000,
     };
 
     const newGrid: TSVState[][][] = [];
@@ -176,6 +176,17 @@ export const useSimulationStore = defineStore('simulation', () => {
       }
     }
 
+    // TSV connects layer z to z+1 — propagate failure to upper layer for visualization
+    for (let z = 0; z < msgConfig.numLayers - 1; z++) {
+      for (let y = 0; y < msgConfig.gridSize; y++) {
+        for (let x = 0; x < msgConfig.gridSize; x++) {
+          if (newGrid[z]![y]![x]!.failed) {
+            newGrid[z + 1]![y]![x]!.failed = true;
+          }
+        }
+      }
+    }
+
     // Track initial failure positions
     const positions = initialFailures.map(f => ({ x: f.x, y: f.y, z: f.z }));
 
@@ -248,11 +259,23 @@ export const useSimulationStore = defineStore('simulation', () => {
       newActiveRequests.delete(req.id);
     }
 
+    // Mark rerouted requests and update their paths
+    for (const rr of events.reroutes) {
+      const req = newActiveRequests.get(rr.requestId);
+      if (req) {
+        req.rerouted = true;
+        req.path = rr.newPath;
+      }
+    }
+
     // Update grid failures — mutate in-place instead of deep-copying
+    // TSV connects layer z to z+1, so mark both layers as failed
     if (events.newFailures.length > 0 && tsvGrid.value) {
       for (const f of events.newFailures) {
         const cell = tsvGrid.value[f.z]?.[f.y]?.[f.x];
         if (cell) cell.failed = true;
+        const cellAbove = tsvGrid.value[f.z + 1]?.[f.y]?.[f.x];
+        if (cellAbove) cellAbove.failed = true;
       }
       triggerRef(tsvGrid);
     }

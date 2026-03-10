@@ -86,8 +86,9 @@ std::optional<Point> Grid::get_nearest_redundant_tsv(int32_t x, int32_t y, int32
 
 void Grid::apply_initial_failures(std::mt19937& rng) {
     std::bernoulli_distribution failure_dist(failure_rate_);
-    
-    for (uint32_t z = 0; z < num_layers_; ++z) {
+
+    // 顶层无TSV（无上层连接），仅对非顶层施加失效
+    for (uint32_t z = 0; z < num_layers_ - 1; ++z) {
         for (uint32_t y = 0; y < grid_size_; ++y) {
             for (uint32_t x = 0; x < grid_size_; ++x) {
                 if (failure_dist(rng)) {
@@ -100,9 +101,9 @@ void Grid::apply_initial_failures(std::mt19937& rng) {
 
 void Grid::apply_runtime_failure(std::mt19937& rng) {
     std::bernoulli_distribution failure_dist(failure_rate_);
-    
-    // 每次调用时，检查所有未失效的TSV是否失效
-    for (uint32_t z = 0; z < num_layers_; ++z) {
+
+    // 顶层无TSV，仅对非顶层检查运行时失效
+    for (uint32_t z = 0; z < num_layers_ - 1; ++z) {
         for (uint32_t y = 0; y < grid_size_; ++y) {
             for (uint32_t x = 0; x < grid_size_; ++x) {
                 TSV& tsv = grid_[z][y][x];

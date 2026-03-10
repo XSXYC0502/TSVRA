@@ -53,7 +53,7 @@ Browser (Vue 3 SPA)  ←WebSocket→  Nitro Server  ←stdio→  C++ Process (bi
 | `web-nuxt/stores/simulation.ts` | Pinia store: accumulates state from WebSocket messages |
 | `web-nuxt/types/simulation.ts` | TypeScript types matching the C++ JSON format |
 
-**Speed control:** The Nitro server queues C++ messages and forwards them at a controlled rate (step/slow/medium/high/auto). In "high" mode, messages bypass the queue. In "auto" mode, it slows down when `keyEvent: true` (failures, reroutes).
+**Speed control (lockstep ack protocol):** C++ is immediately paused after spawn. The browser controls pacing by sending `{ type: "ack", count: N }` messages — the server translates each ack into N `n` (step) commands to C++ stdin. Speed modes (step/slow/medium/high/auto) differ in batch size and delay between acks. Switching speed sends `{ type: "speed" }` which flushes old C++ step credits via `p` command, then a new ack kicks off the new rate. In "auto" mode, the browser inserts a 500ms delay when `keyEvent: true`.
 
 ## C++ JSON Streaming Protocol
 

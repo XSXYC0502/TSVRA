@@ -12,10 +12,10 @@ const config = reactive({
   numLayers: 2,
   gridFactor: 4,
   failureMode: 'c' as 'a' | 'b' | 'c',
-  failureRate: 0.001,
+  failureRate: 0.000001,
   verticalDelay: 1,
   horizontalDelay: 1000,
-  cycles: 100000,
+  cycles: 10000,
   seed: 0,
 });
 

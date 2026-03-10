@@ -44,7 +44,7 @@ void RequestGenerator::build_cumulative_distribution() {
 std::optional<Request> RequestGenerator::generate_request(uint64_t current_time) {
     // 以一定概率生成请求
     // 假设平均每100个周期生成1个请求
-    double request_probability = 0.01;
+    double request_probability = 0.1;
     if (uniform_dist_(rng_) > request_probability) {
         return std::nullopt;
     }

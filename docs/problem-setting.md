@@ -20,7 +20,7 @@ The chip is modeled as a **3D grid of TSV nodes** organized into layers:
 - **Coordinate system**: (x, y, z) where x, y ∈ [0, N-1] and z ∈ [0, L-1]
 - **Total TSV count**: N² × L (default: 512)
 
-Each node in the grid represents a TSV unit at a specific (x, y) position on layer z.
+Each node in the grid represents a **per-layer TSV unit** at position (x, y, z). A TSV is a vertical connection between two adjacent layers — it does **not** span the entire chip from top to bottom. Failing a TSV at (x, y, z) only disrupts the connection at that specific layer; the same (x, y) position on other layers remains unaffected.
 
 ### 2.2 TSV Types
 

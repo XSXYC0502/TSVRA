@@ -321,20 +321,12 @@ function updateFailureMesh() {
         dummy.updateMatrix();
         failureMesh.setMatrixAt(i, dummy.matrix);
 
-        // Check if this TSV column (x,y) is failed on ANY layer
-        let columnFailed = false;
-        for (let lz = 0; lz < layers; lz++) {
-          if (grid[lz]?.[y]?.[x]?.failed) { columnFailed = true; break; }
-        }
-
-        if (columnFailed) {
+        if (tsv.failed) {
           tempColor.setRGB(1.0, 0.15, 0.15);  // red — failed
+        } else if (tsv.redundant) {
+          tempColor.setRGB(0.27, 0.53, 1.0);  // blue — healthy redundant
         } else {
-          if (tsv.redundant) {
-            tempColor.setRGB(0.27, 0.53, 1.0);  // blue — healthy redundant
-          } else {
-            tempColor.setRGB(0.15, 0.7, 0.3);   // green — healthy normal
-          }
+          tempColor.setRGB(0.15, 0.7, 0.3);   // green — healthy normal
         }
         failureMesh.setColorAt(i, tempColor);
         i++;

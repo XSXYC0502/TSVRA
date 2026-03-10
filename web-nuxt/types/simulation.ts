@@ -34,6 +34,7 @@ export interface LiveRequest {
   ex: number; ey: number; ez: number;
   time: number;
   path: [number, number, number][];
+  rerouted?: boolean;
 }
 
 export interface CompletedRequest {
