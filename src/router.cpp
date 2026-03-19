@@ -3,6 +3,7 @@
 #include <unordered_set>
 #include <cmath>
 #include <algorithm>
+#include <iostream>
 #include <limits>
 
 namespace tsvra {
@@ -79,7 +80,21 @@ std::optional<std::pair<std::vector<Point>, uint64_t>> Router::route(
         
         // 到达终点
         if (current.position == end) {
-            std::vector<Point> path = reconstruct_path(nodes, start, end);
+            std::vector<Point> path = expand_path(reconstruct_path(nodes, start, end));
+
+            // 路径完整性验证
+            if (path.empty() || path.front() != start || path.back() != end) {
+                return std::nullopt;
+            }
+            for (size_t i = 1; i < path.size(); ++i) {
+                int32_t d = std::abs(path[i].x - path[i-1].x)
+                          + std::abs(path[i].y - path[i-1].y)
+                          + std::abs(path[i].z - path[i-1].z);
+                if (d != 1) {
+                    return std::nullopt;
+                }
+            }
+
             // 计算实际完成时间，考虑等待时间
             uint64_t actual_time = current_time;
             for (size_t i = 1; i < path.size(); ++i) {
@@ -120,8 +135,9 @@ std::optional<std::pair<std::vector<Point>, uint64_t>> Router::route(
 
             // 仅垂直移动需要检查TSV失效，水平移动跳过
             if (is_vertical_move && tsv->is_failed()) {
-                auto redundant_opt = grid_.get_nearest_redundant_tsv(
-                    neighbor.x, neighbor.y, neighbor.z, current_time);
+                // B5: 使用预估到达时间而非路由起始时间
+                uint64_t estimated_arrival = current_time + static_cast<uint64_t>(current.g_cost);
+                auto redundant_opt = grid_.find_bypass_spare(neighbor, estimated_arrival);
                 if (!redundant_opt.has_value()) {
                     // 没有可用的冗余TSV，跳过这个邻居
                     continue;
@@ -133,17 +149,29 @@ std::optional<std::pair<std::vector<Point>, uint64_t>> Router::route(
                     continue;
                 }
                 
-                // 计算通过冗余TSV的代价
-                // 从当前位置到冗余TSV，然后从冗余TSV到原目标邻居
-                double cost_to_redundant = calculate_move_cost(current.position, redundant_pos);
-                double cost_from_redundant = calculate_move_cost(redundant_pos, neighbor);
+                // 计算通过冗余TSV的代价（基于曼哈顿距离）
+                // 段1：当前位置 → 冗余TSV（同层水平移动）
+                int32_t manhattan_to_spare = std::abs(current.position.x - redundant_pos.x)
+                                           + std::abs(current.position.y - redundant_pos.y);
+                double cost_to_redundant = static_cast<double>(manhattan_to_spare)
+                                         * static_cast<double>(config_.get_horizontal_delay());
+
+                // 段2：冗余TSV垂直穿越 + 到目标(x,y)的水平移动
+                int32_t manhattan_from_spare = std::abs(redundant_pos.x - neighbor.x)
+                                            + std::abs(redundant_pos.y - neighbor.y);
+                double cost_from_redundant = static_cast<double>(config_.get_vertical_delay())
+                                           + static_cast<double>(manhattan_from_spare)
+                                           * static_cast<double>(config_.get_horizontal_delay());
                 double wait_time = 0;
-                if (redundant_tsv->get_available_at() > current_time) {
-                    wait_time = static_cast<double>(redundant_tsv->get_available_at() - current_time);
+                uint64_t spare_arrival = estimated_arrival + static_cast<uint64_t>(cost_to_redundant);
+                if (redundant_tsv->get_available_at() > spare_arrival) {
+                    wait_time = static_cast<double>(redundant_tsv->get_available_at() - spare_arrival);
                 }
 
-                // L_max约束：绕行经过2个节点（冗余TSV + 目标邻居）
-                uint32_t new_hop_count = current.hop_count + 2;
+                // L_max约束：绕行经过 manhattan_to + 1(垂直) + manhattan_from 跳
+                uint32_t bypass_hops = static_cast<uint32_t>(manhattan_to_spare) + 1
+                                     + static_cast<uint32_t>(manhattan_from_spare);
+                uint32_t new_hop_count = current.hop_count + bypass_hops;
                 if (max_path_length > 0 && new_hop_count > max_path_length) {
                     continue;
                 }
@@ -173,10 +201,18 @@ std::optional<std::pair<std::vector<Point>, uint64_t>> Router::route(
                 }
                 continue;
             }
-            
+
+            // B6: 冗余TSV仅供旁路使用，普通路由不得进入冗余坐标
+            // 例外：路由终点恰好在冗余位置
+            if (tsv->is_redundant() && neighbor != end && neighbor != start) {
+                continue;
+            }
+
             // TSV未失效，但可能被占用，允许等待
-            uint64_t actual_arrival_time = current_time;
-            if (tsv->get_available_at() > current_time) {
+            // B5: 使用预估到达时间
+            uint64_t est_arrival_normal = current_time + static_cast<uint64_t>(current.g_cost);
+            uint64_t actual_arrival_time = est_arrival_normal;
+            if (tsv->get_available_at() > est_arrival_normal) {
                 // TSV被占用，需要等待
                 actual_arrival_time = tsv->get_available_at();
             }
@@ -195,7 +231,7 @@ std::optional<std::pair<std::vector<Point>, uint64_t>> Router::route(
 
             // 动态代价：c0 + wait + λ1*congestion + λ2*φ(pfail)
             double move_cost = calculate_move_cost(current.position, neighbor);
-            double wait_cost = static_cast<double>(actual_arrival_time - current_time);
+            double wait_cost = static_cast<double>(actual_arrival_time - est_arrival_normal);
             double congestion_cost = lambda1 * static_cast<double>(tsv->get_usage_count());
             double risk_cost = lambda2 * phi_fail;
             double new_g_cost = current.g_cost + move_cost + wait_cost + congestion_cost + risk_cost;
@@ -273,18 +309,36 @@ std::vector<Point> Router::reconstruct_path(
 ) const {
     std::vector<Point> path;
     Point current = end;
+    last_bypass_count_ = 0;
     
     while (current != start) {
-        path.push_back(current);
         const AStarNode& node = nodes[static_cast<size_t>(current.z)]
                                      [static_cast<size_t>(current.y)]
                                      [static_cast<size_t>(current.x)];
         if (!node.has_parent) {
             break;
         }
-        // 如果使用了冗余TSV，先添加冗余TSV节点
+        // 如果使用了冗余TSV绕行：
+        // 展开为: destination(target_z), spare_exit(target_z), spare_entry(source_z)
+        // reverse后变为: spare_entry(source_z) → spare_exit(target_z) → destination(target_z)
         if (node.used_redundant && node.redundant_via != current && node.redundant_via != node.parent) {
-            path.push_back(node.redundant_via);
+            Point spare_exit{node.redundant_via.x, node.redundant_via.y, current.z};
+            Point spare_entry{node.redundant_via.x, node.redundant_via.y, node.parent.z};
+
+            // 避免退化段产生重复点
+            // 正常情况: push current, spare_exit, spare_entry (reverse后: entry→exit→current)
+            // 退化: spare_exit == current 时跳过spare_exit
+            //        spare_entry == parent 时跳过spare_entry（parent在下一轮push）
+            path.push_back(current);
+            if (spare_exit != current) {
+                path.push_back(spare_exit);
+            }
+            if (spare_entry != node.parent) {
+                path.push_back(spare_entry);
+            }
+            ++last_bypass_count_;
+        } else {
+            path.push_back(current);
         }
         current = node.parent;
     }
@@ -293,6 +347,35 @@ std::vector<Point> Router::reconstruct_path(
     std::reverse(path.begin(), path.end());
     
     return path;
+}
+
+std::vector<Point> Router::expand_path(const std::vector<Point>& compressed) const {
+    if (compressed.empty()) return compressed;
+    std::vector<Point> expanded;
+    expanded.reserve(compressed.size() * 2);
+    expanded.push_back(compressed[0]);
+    for (size_t i = 1; i < compressed.size(); ++i) {
+        const Point& from = compressed[i - 1];
+        const Point& to = compressed[i];
+        if (from.z == to.z && (from.x != to.x || from.y != to.y)) {
+            // 同层水平移动：逐格展开（先x后y）
+            Point cur = from;
+            int32_t dx = (to.x > from.x) ? 1 : (to.x < from.x) ? -1 : 0;
+            int32_t dy = (to.y > from.y) ? 1 : (to.y < from.y) ? -1 : 0;
+            while (cur.x != to.x) {
+                cur.x += dx;
+                expanded.push_back(cur);
+            }
+            while (cur.y != to.y) {
+                cur.y += dy;
+                expanded.push_back(cur);
+            }
+        } else {
+            // 垂直移动或已相邻：直接添加
+            expanded.push_back(to);
+        }
+    }
+    return expanded;
 }
 
 } // namespace tsvra

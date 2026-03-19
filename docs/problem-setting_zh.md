@@ -18,7 +18,8 @@ TSVRA（**TSV冗余架构**，TSV Redundancy Architecture）是一个模拟系�
   - N = 4 × `grid_factor`（默认：grid_factor = 4，即 N = 16）
   - L = `num_layers`（默认：2）
 - **坐标系统**：(x, y, z)，其中 x, y ∈ [0, N-1]，z ∈ [0, L-1]
-- **TSV总数**：N² × L（默认：512）
+- **TSV总数**：N² × L（默认         
+：512）
 
 网格中每个节点代表位于 (x, y, z) 位置的一个**逐层TSV单元**。TSV是相邻两层之间的垂直连接，**并非**贯穿整个芯片从顶到底的通道。(x, y, z) 处的TSV失效仅影响该特定层的连接；同一 (x, y) 位置其他层的TSV不受影响。
 

@@ -16,9 +16,9 @@ The chip is modeled as a **3D grid of TSV nodes** organized into layers:
 
 - **Grid dimensions**: N × N × L
   - N = 4 × `grid_factor` (default: grid_factor = 4, so N = 16)
-  - L = `num_layers` (default: 2)
+  - L = `num_layers` (default: 4)
 - **Coordinate system**: (x, y, z) where x, y ∈ [0, N-1] and z ∈ [0, L-1]
-- **Total TSV count**: N² × L (default: 512)
+- **Total TSV count**: N² × L (default: 1024)
 
 Each node in the grid represents a **per-layer TSV unit** at position (x, y, z). A TSV is a vertical connection between two adjacent layers — it does **not** span the entire chip from top to bottom. Failing a TSV at (x, y, z) only disrupts the connection at that specific layer; the same (x, y) position on other layers remains unaffected.
 
@@ -28,22 +28,38 @@ There are two types of TSVs:
 
 | Type | Role | Placement |
 |------|------|-----------|
-| **Normal TSV** | Carries regular signal traffic between layers | All non-corner positions in each 4×4 region |
-| **Redundant TSV** | Spare unit, activated only when bypassing a failed TSV | Four corner positions of each 4×4 region |
+| **Normal TSV** | Carries regular signal traffic between layers | All non-redundant positions |
+| **Redundant TSV** | Spare unit, activated only when bypassing a failed TSV | At (1+3i, 1+3j) positions in `shared` layout; four corners per 4×4 region in `corner4` layout |
 
-Redundant TSVs do **not** carry normal traffic. They are reserved exclusively as spares.
+> **Implementation note**: The current router does not enforce reserve-only semantics for redundant TSVs. Redundant positions can be used as ordinary route nodes. This means spares may carry normal traffic in addition to serving as bypass targets.
 
-### 2.3 Redundancy Grouping (4×4 Regions)
+### 2.3 Redundancy Grouping (Overlapping 4×4 Blocks with Shared Spare)
 
-The grid is partitioned into non-overlapping **4×4 regions** (each containing 16 TSV positions per layer):
+The grid uses **overlapping 4×4 blocks** with stride 3. Each block contains 16 TSV positions, and adjacent blocks share one row/column of overlap:
 
-- Region (i, j) covers x ∈ [4i, 4i+3], y ∈ [4j, 4j+3]
-- For a 16×16 grid: 4×4 = 16 regions per layer
-- Each region has **4 redundant TSVs** at its corners: (4i, 4j), (4i+3, 4j), (4i, 4j+3), (4i+3, 4j+3)
+- Block (i, j) covers x ∈ [3i, 3i+3], y ∈ [3j, 3j+3]
+- Adjacent blocks overlap by 1 column or 1 row: block (i, j) and block (i+1, j) share column x = 3i+3
+- For a 16×16 grid: 5×5 = 25 blocks per layer (stride 3, indices 0..4)
 
-Corner TSVs are **shared** between adjacent regions (e.g., position (3, 0) is a corner for both region (0,0) and adjacent regions), enabling cross-region redundancy coverage.
+> **Grid size constraint**: The stride-3 block scheme fully tiles the grid when N ≡ 1 (mod 3), which holds for the default N=16 (grid_factor=4) and N=4 (grid_factor=1). For other grid sizes, edge TSVs beyond the last complete block are assigned to the nearest block.
 
-> **Note**: The current 4×4 corner-based redundancy is one specific strategy. The simulator is designed to evaluate and compare different redundancy placement strategies in future development.
+Each block has **1 redundant TSV** at position **(1+3i, 1+3j)** — this spare belongs exclusively to block (i, j):
+
+- Redundant positions in a 16×16 grid: x, y ∈ {1, 4, 7, 10, 13}
+- Total redundant TSVs per layer: 25
+- Redundancy ratio: 25/256 ≈ **9.77%**
+
+A failed normal TSV at an overlap boundary (e.g., position (3, 3)) belongs to up to 4 blocks and can therefore access up to 4 candidate spares. A failed TSV in the interior of a single block has exactly 1 candidate spare. This coverage asymmetry is the key property of the overlapping block model.
+
+**Redundancy strategies** (selectable via `--redundancy`):
+
+| Strategy | Redundant Positions | Spares/Layer (16×16) | Ratio | Search |
+|----------|-------------------|---------------------|-------|--------|
+| `shared` (default) | (1+3i, 1+3j) | 25 | 9.77% | Coverage-limited |
+| `corner4` (legacy) | (mod4 ∈ {0,3}) × (mod4 ∈ {0,3}) | 64 | 25% | Global same-layer scan |
+| `none` | None | 0 | 0% | No bypass |
+
+> **Note**: The `corner4` layout preserves the original simulator behavior for backward compatibility. The `shared` layout implements the literature-correct block-group redundancy scheme (IEEE 2025).
 
 ### 2.4 Signal Flow Direction
 
@@ -64,16 +80,16 @@ The two movement types have fundamentally different physical characteristics:
 
 | Movement | Delay | Physical Meaning |
 |----------|-------|------------------|
-| **Vertical** (layer change via TSV) | `vertical_delay` (default: 1) | TSV acts as a direct wire/tunnel — signal passes through with minimal delay |
-| **Horizontal** (same-layer routing) | `horizontal_delay` (default: 1000) | Intra-layer metal interconnect routing, including signal processing and routing decisions — orders of magnitude slower |
+| **Vertical** (layer change via TSV) | `vertical_delay` (default: 5) | TSV signal propagation delay — accounts for copper pillar, insulation, and coupling effects (IEICE 2015) |
+| **Horizontal** (same-layer routing) | `horizontal_delay` (default: 500) | Intra-layer metal interconnect routing — signal processing and routing decisions. V:H ratio ≈ 100:1 (IEICE 2015) |
 
-The 1000:1 ratio reflects the physical reality that a TSV is essentially a short vertical conductor, while horizontal routing involves metal traces, buffers, and switching logic.
+The 100:1 ratio reflects the physical reality that a TSV is a short vertical conductor, while horizontal routing involves metal traces, buffers, and switching logic.
 
-### 3.3 TSV Sharing
+### 3.3 TSV Occupancy
 
-TSVs transmit signals extremely fast relative to the overall transmission time. Multiple signals can share the same TSV simultaneously without side effects. TSV contention is **not** a bottleneck in this model.
+TSVs have finite transmission capacity. The simulator tracks occupancy via `available_at` timestamps. When a signal uses a TSV, that TSV becomes unavailable until the transmission completes. Subsequent signals must wait if they attempt to use an occupied TSV.
 
-> **Implementation note**: The code tracks `available_at` timestamps for occupancy, but physically, TSV sharing is assumed to be conflict-free.
+> **Implementation note**: The current model applies occupancy to all hops (both vertical TSV moves and horizontal routing). This creates contention-based queueing effects.
 
 ## 4. Failure Model
 
@@ -99,11 +115,17 @@ Three failure modes control when TSVs can physically fail:
 
 ### 4.3 Failure Handling — Redundancy Bypass
 
-When the routing algorithm encounters a failed TSV:
+When the routing algorithm encounters a failed TSV on a vertical move:
 
-1. Search for the **nearest available redundant TSV** on the **same layer** (by Manhattan distance)
-2. Compute a bypass path: current position → redundant TSV → next intended hop
-3. If no redundant TSV is available on that layer, the route must find an alternative path or the request fails
+1. Determine which block(s) the failed TSV belongs to
+2. Search for the **nearest available redundant TSV** among the spare(s) of those block(s)
+3. Compute a bypass path: current position → redundant TSV → next intended hop
+4. If no redundant TSV is available, the route must find an alternative path or the request fails
+
+**Search semantics by layout**:
+- `shared`: Search only the spare(s) of block(s) covering the failed coordinate (coverage-limited). A failed TSV at an overlap boundary may access spares from up to 4 blocks.
+- `corner4`: Global same-layer scan of all redundant TSVs (legacy behavior, not coverage-limited).
+- `none`: No bypass available — routing must find alternative paths entirely.
 
 ## 5. Request Model
 
@@ -111,7 +133,7 @@ When the routing algorithm encounters a failed TSV:
 
 Requests are generated stochastically each simulation cycle:
 
-- **Generation probability**: ~1% per cycle (on average, 1 request per 100 cycles)
+- **Generation probability**: ~10% per cycle (on average, 1 request per 10 cycles)
 - **Source**: Random position on any layer, weighted by hotspot distribution
 - **Destination**: Random position on the **top layer** (z = L-1), weighted by hotspot distribution
 
@@ -201,7 +223,7 @@ where `c0(a, b)` = `vertical_delay` if same (x,y), `horizontal_delay` otherwise.
 
 ## 7. Simulation Loop
 
-The simulation runs for a configurable number of cycles (default: 10,000,000). Each cycle executes four steps in order:
+The simulation runs for a configurable number of cycles (default: 100,000). Each cycle executes four steps in order:
 
 ```
 for each cycle:
@@ -217,9 +239,15 @@ The simulation collects and exports:
 
 **Summary statistics** (`{prefix}_summary.csv`):
 - Total / completed / failed request counts
-- Success rate
-- Latency: min, max, average
-- TSV failure count
+- Success Rate (%): completed / total_generated (completion-by-horizon metric, includes in-flight requests in denominator)
+- Terminal Delivery Rate (%): completed / (completed + failed) (excludes in-flight requests)
+- Route Failure Rate (%): failed / total_generated
+- In Flight At Horizon: count of requests still transmitting when simulation ends
+- Latency: min, max, average (for completed requests only)
+- TSV failure count (total and redundant)
+- Redundant TSV usages: count of bypass operations
+- Failed Vertical Encounters: count of failed TSV hits during routing
+- Spare Found / Spare Unavailable: bypass diagnostic counters
 
 **Per-request details** (`{prefix}_requests.csv`):
 - Source and destination coordinates
@@ -230,12 +258,12 @@ The simulation collects and exports:
 
 | Parameter | Description | Default |
 |-----------|-------------|---------|
-| `num_layers` | Number of chip layers (L) | 2 |
+| `num_layers` | Number of chip layers (L) | 4 |
 | `grid_factor` | Grid size factor (N = 4 × grid_factor) | 4 |
 | `failure_mode` | Hardware failure mode: a / b / c | a |
-| `failure_rate` | Per-TSV failure probability | 1e-6 |
-| `vertical_delay` | Delay for vertical (inter-layer) movement | 1 |
-| `horizontal_delay` | Delay for horizontal (intra-layer) movement | 1000 |
+| `failure_rate` | Per-TSV failure probability | 1e-5 |
+| `vertical_delay` | Delay for vertical (inter-layer) movement | 5 |
+| `horizontal_delay` | Delay for horizontal (intra-layer) movement | 500 |
 | `simulation_cycles` | Total simulation cycles | 100,000 |
 | `output_prefix` | Output CSV filename prefix | tsvra_output |
 | `random_seed` | RNG seed (0 = random device) | 0 |
@@ -243,3 +271,18 @@ The simulation collects and exports:
 | `lambda2` | Reliability risk weight (λ2) | 0.0 (disabled) |
 | `max_path_length` | Maximum path hops (L_max, 0=unlimited) | 0 |
 | `reliability_min` | Minimum path reliability (R_min, 0=no constraint) | 0.0 |
+| `redundancy` | Redundancy layout: shared / corner4 / none | shared |
+| `failure_model` | Failure distribution: uniform / clustered | uniform |
+| `cluster_strength` | Clustering strength [0.0, 1.0] | 0.8 |
+| `cluster_radius` | Clustering radius (Manhattan distance) | 4 |
+
+### Legacy Defaults (for backward-compatibility comparison)
+
+| Parameter | Legacy Value | Calibrated Value | Source |
+|-----------|-------------|-----------------|--------|
+| `num_layers` | 2 | 4 | IEICE 2012 |
+| `failure_rate` | 1e-6 | 1e-5 | 电子测量技术 2025 |
+| `vertical_delay` | 1 | 5 | IEICE 2015 |
+| `horizontal_delay` | 1000 | 500 | IEICE 2015 |
+| `simulation_cycles` | 10,000 | 100,000 | Statistical significance |
+| `redundancy` | corner4 | shared | IEEE 2025 |

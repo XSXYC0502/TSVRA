@@ -47,3 +47,7 @@ build/
 node_modules
 .nuxt
 .output
+
+refine-logs/
+experiment-results/
+*.pdf
