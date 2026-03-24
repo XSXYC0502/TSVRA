@@ -22,7 +22,20 @@ public:
     
     // 记录TSV使用
     void record_redundant_tsv_usage();
-    
+
+    // 记录旁路诊断
+    void record_failed_vertical_encounter();
+    void record_spare_found();
+    void record_spare_unavailable();
+
+    // 直接设置旁路诊断计数器（从Grid批量拷贝时使用）
+    void set_failed_vertical_encounters(uint64_t v) { failed_vertical_encounters_ = v; }
+    void set_spare_found(uint64_t v) { spare_found_ = v; }
+    void set_spare_unavailable(uint64_t v) { spare_unavailable_ = v; }
+
+    // 记录在途请求（仿真结束时）
+    void record_in_flight(uint64_t count);
+
     // 更新失效统计
     void update_failure_stats(const Grid& grid);
     
@@ -40,7 +53,12 @@ public:
     uint64_t get_min_latency() const { return min_latency_; }
     uint64_t get_total_latency() const { return total_latency_; }
     uint64_t get_redundant_tsv_usages() const { return redundant_tsv_usages_; }
+    uint64_t get_failed_vertical_encounters() const { return failed_vertical_encounters_; }
+    uint64_t get_spare_found() const { return spare_found_; }
+    uint64_t get_spare_unavailable() const { return spare_unavailable_; }
+    uint64_t get_in_flight() const { return in_flight_; }
     uint32_t get_current_failed_tsvs() const { return current_failed_tsvs_; }
+    uint32_t get_current_failed_redundant_tsvs() const { return current_failed_redundant_tsvs_; }
     const std::vector<Request>& get_completed_requests_list() const { return completed_requests_list_; }
     const std::vector<Request>& get_failed_requests_list() const { return failed_requests_list_; }
 
@@ -60,6 +78,10 @@ private:
     
     // TSV统计
     uint64_t redundant_tsv_usages_;
+    uint64_t failed_vertical_encounters_;
+    uint64_t spare_found_;
+    uint64_t spare_unavailable_;
+    uint64_t in_flight_;
     uint32_t current_failed_tsvs_;
     uint32_t current_failed_redundant_tsvs_;
     

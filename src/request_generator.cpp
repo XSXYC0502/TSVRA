@@ -1,4 +1,5 @@
 #include "request_generator.hpp"
+#include "grid.hpp"
 #include <algorithm>
 
 namespace tsvra {
@@ -66,16 +67,23 @@ double RequestGenerator::get_hotspot_weight(uint32_t region_x, uint32_t region_y
 }
 
 Point RequestGenerator::sample_position_from_region(uint32_t region_x, uint32_t region_y, int32_t z) {
-    // 在4x4区域内随机选择一个TSV
+    // 在4x4区域内随机选择一个非冗余TSV
     std::uniform_int_distribution<int32_t> offset_dist(0, 3);
-    
+
     int32_t base_x = static_cast<int32_t>(region_x * 4);
     int32_t base_y = static_cast<int32_t>(region_y * 4);
-    
-    int32_t x = base_x + offset_dist(rng_);
-    int32_t y = base_y + offset_dist(rng_);
-    
-    return Point(x, y, z);
+
+    // 重采样直到找到非冗余位置（每个4x4区域必有非冗余格）
+    RedundancyLayout layout = config_.get_redundancy_layout();
+    for (int attempt = 0; attempt < 100; ++attempt) {
+        int32_t x = base_x + offset_dist(rng_);
+        int32_t y = base_y + offset_dist(rng_);
+        if (!Grid::is_redundant_position_static(x, y, layout)) {
+            return Point(x, y, z);
+        }
+    }
+    // 不应到达此处，但安全回退
+    return Point(base_x + 1, base_y + 1, z);
 }
 
 Point RequestGenerator::sample_start_position() {

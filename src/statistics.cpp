@@ -16,6 +16,10 @@ Statistics::Statistics(const Config& config)
       max_latency_(0),
       min_latency_(std::numeric_limits<uint64_t>::max()),
       redundant_tsv_usages_(0),
+      failed_vertical_encounters_(0),
+      spare_found_(0),
+      spare_unavailable_(0),
+      in_flight_(0),
       current_failed_tsvs_(0),
       current_failed_redundant_tsvs_(0) {
 }
@@ -43,6 +47,22 @@ void Statistics::record_request_failed(const Request& req) {
 
 void Statistics::record_redundant_tsv_usage() {
     ++redundant_tsv_usages_;
+}
+
+void Statistics::record_failed_vertical_encounter() {
+    ++failed_vertical_encounters_;
+}
+
+void Statistics::record_spare_found() {
+    ++spare_found_;
+}
+
+void Statistics::record_spare_unavailable() {
+    ++spare_unavailable_;
+}
+
+void Statistics::record_in_flight(uint64_t count) {
+    in_flight_ = count;
 }
 
 void Statistics::update_failure_stats(const Grid& grid) {
@@ -118,6 +138,22 @@ void Statistics::export_to_csv(const std::string& filename) const {
     file << "Failed TSVs," << current_failed_tsvs_ << "\n";
     file << "Failed Redundant TSVs," << current_failed_redundant_tsvs_ << "\n";
     file << "Redundant TSV Usages," << redundant_tsv_usages_ << "\n";
+    file << "Failed Vertical Encounters," << failed_vertical_encounters_ << "\n";
+    file << "Spare Found," << spare_found_ << "\n";
+    file << "Spare Unavailable," << spare_unavailable_ << "\n";
+    file << "In Flight At Horizon," << in_flight_ << "\n";
+
+    // 计算终端投递率（排除在途请求）
+    uint64_t terminal_total = completed_requests_ + failed_requests_;
+    if (terminal_total > 0) {
+        double terminal_rate = static_cast<double>(completed_requests_) * 100.0 / static_cast<double>(terminal_total);
+        file << "Terminal Delivery Rate (%)," << terminal_rate << "\n";
+    }
+    // 路由失败率
+    if (total_requests_ > 0) {
+        double route_fail_rate = static_cast<double>(failed_requests_) * 100.0 / static_cast<double>(total_requests_);
+        file << "Route Failure Rate (%)," << route_fail_rate << "\n";
+    }
     
     file.close();
     std::cout << "统计数据已导出到: " << filename << std::endl;

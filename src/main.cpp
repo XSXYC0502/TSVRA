@@ -13,6 +13,12 @@ int main(int argc, char* argv[]) {
             return 0; // 用户请求帮助或其他非错误退出
         }
 
+        // --print-defaults: 输出默认配置JSON并退出
+        if (config.get_print_defaults()) {
+            std::cout << config.to_json() << std::endl;
+            return 0;
+        }
+
         // 验证配置
         if (!config.validate()) {
             std::cerr << "配置验证失败\n";

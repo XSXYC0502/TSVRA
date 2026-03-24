@@ -123,6 +123,30 @@ void Simulator::emit_init_json() {
     oss << ",\"verticalDelay\":" << config_.get_vertical_delay();
     oss << ",\"horizontalDelay\":" << config_.get_horizontal_delay();
     oss << ",\"totalCycles\":" << config_.get_simulation_cycles();
+
+    // 冗余布局信息
+    std::string rl;
+    switch (config_.get_redundancy_layout()) {
+        case RedundancyLayout::LEGACY_CORNER4: rl = "corner4"; break;
+        case RedundancyLayout::SHARED_SPARE:   rl = "shared"; break;
+        case RedundancyLayout::NONE:           rl = "none"; break;
+    }
+    oss << ",\"redundancy\":{\"layout\":\"" << rl << "\"";
+    oss << ",\"sparesPerLayer\":" << grid_->get_total_redundant_tsvs() / std::max(1u, grid_->get_num_layers());
+    oss << ",\"redundancyRatio\":" << (grid_->get_total_tsvs() > 0 ? static_cast<double>(grid_->get_total_redundant_tsvs()) / grid_->get_total_tsvs() : 0.0);
+    oss << "}";
+
+    // 失效模型信息
+    std::string fmodel;
+    switch (config_.get_failure_model()) {
+        case FailureModel::UNIFORM:   fmodel = "uniform"; break;
+        case FailureModel::CLUSTERED: fmodel = "clustered"; break;
+    }
+    oss << ",\"failureModel\":{\"type\":\"" << fmodel << "\"";
+    oss << ",\"clusterStrength\":" << config_.get_cluster_params().strength;
+    oss << ",\"clusterRadius\":" << config_.get_cluster_params().radius;
+    oss << "}";
+
     oss << "}";
 
     // Grid state
@@ -277,8 +301,6 @@ void Simulator::emit_cycle_json() {
 }
 
 void Simulator::emit_done_json() {
-    stats_.update_failure_stats(*grid_);
-
     std::ostringstream oss;
     oss << "{\"type\":\"done\",\"summary\":{";
     oss << "\"totalRequests\":" << stats_.get_total_requests();
@@ -294,9 +316,39 @@ void Simulator::emit_done_json() {
     oss << ",\"avgLatency\":" << std::fixed << std::setprecision(1) << stats_.get_average_latency();
     oss << ",\"maxLatency\":" << stats_.get_max_latency();
     uint64_t min_lat = stats_.get_min_latency();
-    // If no requests completed, min_latency is max uint64 sentinel; output 0 instead
     if (stats_.get_completed_requests() == 0) min_lat = 0;
     oss << ",\"minLatency\":" << min_lat;
+
+    // 冗余TSV与失效统计
+    oss << ",\"redundantTSVUsages\":" << stats_.get_redundant_tsv_usages();
+    oss << ",\"failedTSVs\":" << stats_.get_current_failed_tsvs();
+    oss << ",\"failedRedundantTSVs\":" << stats_.get_current_failed_redundant_tsvs();
+
+    // 旁路诊断计数器
+    oss << ",\"failedVerticalEncounters\":" << stats_.get_failed_vertical_encounters();
+    oss << ",\"spareFound\":" << stats_.get_spare_found();
+    oss << ",\"spareUnavailable\":" << stats_.get_spare_unavailable();
+
+    // 在途请求
+    oss << ",\"inFlightAtHorizon\":" << stats_.get_in_flight();
+
+    // 终端投递率（排除在途请求）
+    uint64_t terminal_total = stats_.get_completed_requests() + stats_.get_failed_requests();
+    double terminal_rate = 0.0;
+    if (terminal_total > 0) {
+        terminal_rate = static_cast<double>(stats_.get_completed_requests()) * 100.0 /
+                        static_cast<double>(terminal_total);
+    }
+    oss << ",\"terminalDeliveryRate\":" << std::fixed << std::setprecision(2) << terminal_rate;
+
+    // 路由失败率
+    double route_fail_rate = 0.0;
+    if (stats_.get_total_requests() > 0) {
+        route_fail_rate = static_cast<double>(stats_.get_failed_requests()) * 100.0 /
+                          static_cast<double>(stats_.get_total_requests());
+    }
+    oss << ",\"routeFailureRate\":" << std::fixed << std::setprecision(2) << route_fail_rate;
+
     oss << "}}";
     std::cout << oss.str() << std::endl;
 }
@@ -379,10 +431,19 @@ void Simulator::run() {
             }
         }
 
-        emit_done_json();
-
-        // Update final stats
+        // 更新最终统计（emit_done_json之前）
         stats_.update_failure_stats(*grid_);
+
+        // 记录在途请求数
+        uint64_t in_flight = pending_requests_.size() + transmitting_requests_.size();
+        stats_.record_in_flight(in_flight);
+
+        // 复制旁路诊断计数器（从grid到stats，O(1)直接赋值）
+        stats_.set_failed_vertical_encounters(grid_->get_failed_vertical_encounters());
+        stats_.set_spare_found(grid_->get_spare_found());
+        stats_.set_spare_unavailable(grid_->get_spare_unavailable());
+
+        emit_done_json();
     } else {
         // Normal mode (unchanged)
         std::cout << "开始仿真...\n";
@@ -404,6 +465,15 @@ void Simulator::run() {
 
         // 更新最终统计
         stats_.update_failure_stats(*grid_);
+
+        // 记录在途请求数
+        uint64_t in_flight = pending_requests_.size() + transmitting_requests_.size();
+        stats_.record_in_flight(in_flight);
+
+        // 复制旁路诊断计数器（O(1)直接赋值）
+        stats_.set_failed_vertical_encounters(grid_->get_failed_vertical_encounters());
+        stats_.set_spare_found(grid_->get_spare_found());
+        stats_.set_spare_unavailable(grid_->get_spare_unavailable());
     }
 }
 
@@ -558,36 +628,20 @@ bool Simulator::route_request(Request& req) {
     req.next_hop_time = current_cycle_;
     req.complete_time = complete_time;
 
-    // 检查是否使用了冗余TSV绕行失效TSV
-    for (size_t i = 0; i < path.size(); ++i) {
-        TSV* tsv = grid_->get_tsv(path[i].x, path[i].y, path[i].z);
-        if (tsv && tsv->is_redundant()) {
-            bool used_for_bypass = false;
-            if (i > 0) {
-                TSV* prev_tsv = grid_->get_tsv(path[i-1].x, path[i-1].y, path[i-1].z);
-                if (prev_tsv && prev_tsv->is_failed()) {
-                    used_for_bypass = true;
-                }
-            }
-            if (!used_for_bypass && i + 1 < path.size()) {
-                TSV* next_tsv = grid_->get_tsv(path[i+1].x, path[i+1].y, path[i+1].z);
-                if (next_tsv && next_tsv->is_failed()) {
-                    used_for_bypass = true;
-                }
-            }
-            if (used_for_bypass) {
-                stats_.record_redundant_tsv_usage();
-            }
-        }
+    // 记录旁路使用次数（由Router在reconstruct_path中精确计数）
+    for (uint32_t i = 0; i < router_->get_last_bypass_count(); ++i) {
+        stats_.record_redundant_tsv_usage();
     }
 
     return true;
 }
 
 bool Simulator::reroute_request(Request& req) {
-    // 从当前位置重新路由到终点
-    Point current_pos = req.get_current_position();
-    auto result = router_->route(current_pos, req.end, current_cycle_);
+    // 从上一个已到达位置重新路由到终点
+    // 注意: current_hop已在update_transmitting_requests中递增,
+    // 指向失效的下一跳, 实际位置是current_hop-1
+    Point actual_pos = (req.current_hop > 0) ? req.path[req.current_hop - 1] : req.path[0];
+    auto result = router_->route(actual_pos, req.end, current_cycle_);
 
     if (!result.has_value()) {
         // 重路由失败
@@ -602,12 +656,21 @@ bool Simulator::reroute_request(Request& req) {
         old_path_copy = req.path;
     }
 
-    // 更新路径（保留已完成的部分+新路径）
-    std::vector<Point> updated_path(req.path.begin(), req.path.begin() + static_cast<long>(req.current_hop) + 1);
+    // 更新路径（保留已到达的部分+新路径）
+    // actual_pos = path[current_hop-1], 新路径从actual_pos开始
+    size_t keep_up_to = (req.current_hop > 0) ? req.current_hop - 1 : 0;
+    std::vector<Point> updated_path(req.path.begin(), req.path.begin() + static_cast<long>(keep_up_to) + 1);
     updated_path.insert(updated_path.end(), new_path.begin() + 1, new_path.end());
 
     req.path = updated_path;
+    req.current_hop = keep_up_to; // 回退到实际位置
+    req.next_hop_time = current_cycle_; // 重置跳转时间
     req.complete_time = complete_time;
+
+    // 记录重路由段的旁路使用次数
+    for (uint32_t i = 0; i < router_->get_last_bypass_count(); ++i) {
+        stats_.record_redundant_tsv_usage();
+    }
 
     // Track reroute for JSON streaming
     if (json_stream_mode_) {
@@ -698,7 +761,13 @@ void Simulator::update_transmitting_requests() {
                 Point prev_pos = req.path[req.current_hop - 1];
                 uint64_t hop_delay = static_cast<uint64_t>(
                     router_->calculate_path_delay({prev_pos, next_pos}));
-                req.next_hop_time = current_cycle_ + hop_delay;
+
+                // B4: 等待TSV空闲后再开始传输
+                uint64_t start_time = current_cycle_;
+                if (next_tsv && next_tsv->get_available_at() > current_cycle_) {
+                    start_time = next_tsv->get_available_at();
+                }
+                req.next_hop_time = start_time + hop_delay;
 
                 // 占用TSV
                 if (next_tsv) {

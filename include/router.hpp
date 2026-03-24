@@ -31,6 +31,9 @@ public:
     
     // 计算路径的传输时间
     uint64_t calculate_path_delay(const std::vector<Point>& path) const;
+
+    // 上次route()调用中实际使用旁路绕行的次数
+    uint32_t get_last_bypass_count() const { return last_bypass_count_; }
     
     // 默认曼哈顿距离启发函数
     static double manhattan_distance(const Point& a, const Point& b);
@@ -39,6 +42,7 @@ private:
     Grid& grid_;
     const Config& config_;
     HeuristicFunc heuristic_;
+    mutable uint32_t last_bypass_count_ = 0; // 上次route()调用中实际使用旁路的次数
     
     // A*节点
     struct AStarNode {
@@ -74,6 +78,9 @@ private:
         const Point& start,
         const Point& end
     ) const;
+
+    // 将压缩路径展开为单元相邻步（水平段逐格展开）
+    std::vector<Point> expand_path(const std::vector<Point>& compressed) const;
 };
 
 } // namespace tsvra
