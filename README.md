@@ -18,21 +18,17 @@ TSVRA (TSV Routing Algorithm) 是一个3D芯片TSV（Through-Silicon Via）路�
 
 ## 系统要求
 
-- C++20兼容编译器（GCC 10+, Clang 11+）
+- C++20兼容编译器（GCC 10+, Clang 11+, 或 Visual Studio 2022 / MSVC）
 - CMake 3.20+
 
 ## 编译
 
 ```bash
-# 创建构建目录
-mkdir build
-cd build
+# 配置
+cmake -S . -B build
 
-# 配置CMake
-cmake ..
-
-# 编译
-make
+# 编译（Linux / macOS / Windows 通用）
+cmake --build build --config Release
 
 # 可执行文件将生成在 bin/ 目录下
 ```
@@ -45,10 +41,22 @@ make
 ./bin/tsvra
 ```
 
+Windows PowerShell / CMD:
+
+```powershell
+.\bin\tsvra.exe
+```
+
 ### 使用配置文件
 
 ```bash
 ./bin/tsvra --config config.ini
+```
+
+Windows PowerShell / CMD:
+
+```powershell
+.\bin\tsvra.exe --config config.ini
 ```
 
 ### 命令行参数
@@ -211,4 +219,3 @@ double request_probability = 0.01; // 1%概率/周期
 ## 致谢
 
 本项目用于3D芯片TSV路由算法的研究和性能评估。
-

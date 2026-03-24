@@ -6,6 +6,21 @@
 #include <random>
 #include <iomanip>
 
+namespace {
+
+void trim_ascii_whitespace(std::string& value) {
+    const auto first = value.find_first_not_of(" \t\r\n");
+    if (first == std::string::npos) {
+        value.clear();
+        return;
+    }
+
+    const auto last = value.find_last_not_of(" \t\r\n");
+    value = value.substr(first, last - first + 1);
+}
+
+} // namespace
+
 namespace tsvra {
 
 Config::Config()
@@ -45,10 +60,9 @@ bool Config::load_from_file(const std::string& filename) {
         std::istringstream iss(line);
         std::string key, value;
         if (std::getline(iss, key, '=') && std::getline(iss, value)) {
-            key.erase(0, key.find_first_not_of(" \t"));
-            key.erase(key.find_last_not_of(" \t") + 1);
-            value.erase(0, value.find_first_not_of(" \t"));
-            value.erase(value.find_last_not_of(" \t") + 1);
+            // 去除前后空格和Windows风格换行残留
+            trim_ascii_whitespace(key);
+            trim_ascii_whitespace(value);
 
             if (key == "num_layers") {
                 num_layers_ = static_cast<uint32_t>(std::stoul(value));
