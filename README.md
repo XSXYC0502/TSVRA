@@ -33,6 +33,22 @@ cmake --build build --config Release
 # 可执行文件将生成在 bin/ 目录下
 ```
 
+Windows + MSVC:
+
+```powershell
+cmake --preset windows-msvc
+cmake --build --preset windows-msvc-release
+ctest --preset windows-msvc-release
+```
+
+If you prefer not to use presets, the equivalent configure command is:
+
+```powershell
+cmake -S . -B build/windows-msvc -G "Visual Studio 17 2022" -A x64
+```
+
+If CMake reports `No CMAKE_CXX_COMPILER could be found` at `CMakeLists.txt:3`, that means MSVC was not discoverable from the current shell. Using the preset above avoids relying on an already-initialized compiler environment.
+
 ## 使用方法
 
 ### 基本用法
