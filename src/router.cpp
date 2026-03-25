@@ -183,6 +183,12 @@ std::optional<std::pair<std::vector<Point>, uint64_t>> Router::route(
                 }
 
                 // Dynamic cost: c0 + wait + lambda1*congestion + lambda2*phi(pfail)
+                double congestion_cost = lambda1 * static_cast<double>(redundant_tsv->get_usage_count());
+                double risk_cost = lambda2 * 2.0 * phi_fail;
+                double move_cost = cost_to_redundant + cost_from_redundant + wait_time + congestion_cost + risk_cost;
+                double new_g_cost = current.g_cost + move_cost;
+                double h_cost = heuristic_(neighbor, end);
+
                 AStarNode& neighbor_node = nodes[static_cast<size_t>(neighbor.z)]
                                                [static_cast<size_t>(neighbor.y)]
                                                [static_cast<size_t>(neighbor.x)];

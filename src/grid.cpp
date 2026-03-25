@@ -52,8 +52,10 @@ uint32_t Grid::get_region_id(int32_t x, int32_t y) const {
         uint32_t gf = config_.get_grid_factor();
         uint32_t stride = (gf > 1) ? gf - 1 : 1;
         uint32_t blocks_per_row = (grid_size_ >= 2) ? (grid_size_ - 2) / stride + 1 : 1;
-        uint32_t bi = std::min(static_cast<uint32_t>(std::max(x, 0) / stride), blocks_per_row - 1);
-        uint32_t bj = std::min(static_cast<uint32_t>(std::max(y, 0) / stride), blocks_per_row - 1);
+        uint32_t clamped_x = static_cast<uint32_t>(std::max(x, 0));
+        uint32_t clamped_y = static_cast<uint32_t>(std::max(y, 0));
+        uint32_t bi = std::min(clamped_x / stride, blocks_per_row - 1);
+        uint32_t bj = std::min(clamped_y / stride, blocks_per_row - 1);
         return bi * blocks_per_row + bj;
     }
     uint32_t regions_per_row = grid_size_ / 4;

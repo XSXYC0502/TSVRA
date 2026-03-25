@@ -7,8 +7,6 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-include_directories(${PROJECT_SOURCE_DIR}/include)
-
 function(tsvra_apply_compile_options target_name)
     if (MSVC)
         target_compile_options(${target_name} PRIVATE
@@ -63,7 +61,7 @@ function(tsvra_set_runtime_output target_name)
     )
 endfunction()
 
-# 源文件（不含main.cpp）
+# Source files (excluding main.cpp)
 set(LIB_SOURCES
     src/config.cpp
     src/tsv.cpp
@@ -79,6 +77,7 @@ find_package(Threads REQUIRED)
 
 # Static library shared by the main program and tests
 add_library(tsvra_lib STATIC ${LIB_SOURCES})
+target_include_directories(tsvra_lib PUBLIC ${PROJECT_SOURCE_DIR}/include)
 target_link_libraries(tsvra_lib PRIVATE Threads::Threads)
 tsvra_apply_compile_options(tsvra_lib)
 

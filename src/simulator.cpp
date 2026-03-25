@@ -724,6 +724,7 @@ bool Simulator::reroute_request(Request& req) {
 
     if (!result.has_value()) {
         // Reroute failed
+        return false;
     }
 
     auto [new_path, complete_time] = result.value();

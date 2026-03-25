@@ -88,6 +88,14 @@ Point RequestGenerator::sample_position_from_region(uint32_t region_x, uint32_t 
 
 Point RequestGenerator::sample_start_position() {
     // Sample region based on hotspot weights
+    double rand_val = uniform_dist_(rng_) * total_weight_;
+
+    auto it = std::lower_bound(cumulative_weights_.begin(), cumulative_weights_.end(), rand_val);
+    size_t region_idx = static_cast<size_t>(it - cumulative_weights_.begin());
+
+    uint32_t region_x = static_cast<uint32_t>(region_idx % num_regions_);
+    uint32_t region_y = static_cast<uint32_t>(region_idx / num_regions_);
+
     int32_t z = static_cast<int32_t>(layer_dist_(rng_));
     
     return sample_position_from_region(region_x, region_y, z);
@@ -110,4 +118,3 @@ Point RequestGenerator::sample_end_position() {
 }
 
 } // namespace tsvra
-
