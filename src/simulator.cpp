@@ -124,7 +124,7 @@ void Simulator::emit_init_json() {
     oss << ",\"horizontalDelay\":" << config_.get_horizontal_delay();
     oss << ",\"totalCycles\":" << config_.get_simulation_cycles();
 
-    // 冗余布局信息
+    // Redundancy layout info
     std::string rl;
     switch (config_.get_redundancy_layout()) {
         case RedundancyLayout::LEGACY_CORNER4: rl = "corner4"; break;
@@ -136,7 +136,7 @@ void Simulator::emit_init_json() {
     oss << ",\"redundancyRatio\":" << (grid_->get_total_tsvs() > 0 ? static_cast<double>(grid_->get_total_redundant_tsvs()) / grid_->get_total_tsvs() : 0.0);
     oss << "}";
 
-    // 失效模型信息
+    // Failure model info
     std::string fmodel;
     switch (config_.get_failure_model()) {
         case FailureModel::UNIFORM:   fmodel = "uniform"; break;
@@ -281,6 +281,7 @@ void Simulator::emit_cycle_json() {
     oss << ",\"stats\":{";
     oss << "\"pending\":" << pending_requests_.size();
     oss << ",\"transmitting\":" << transmitting_requests_.size();
+    oss << ",\"totalRequests\":" << stats_.get_total_requests();
     oss << ",\"completed\":" << stats_.get_completed_requests();
     oss << ",\"failed\":" << stats_.get_failed_requests();
 
@@ -319,20 +320,20 @@ void Simulator::emit_done_json() {
     if (stats_.get_completed_requests() == 0) min_lat = 0;
     oss << ",\"minLatency\":" << min_lat;
 
-    // 冗余TSV与失效统计
+    // Redundant TSV and failure statistics
     oss << ",\"redundantTSVUsages\":" << stats_.get_redundant_tsv_usages();
     oss << ",\"failedTSVs\":" << stats_.get_current_failed_tsvs();
     oss << ",\"failedRedundantTSVs\":" << stats_.get_current_failed_redundant_tsvs();
 
-    // 旁路诊断计数器
+    // Bypass diagnostic counters
     oss << ",\"failedVerticalEncounters\":" << stats_.get_failed_vertical_encounters();
     oss << ",\"spareFound\":" << stats_.get_spare_found();
     oss << ",\"spareUnavailable\":" << stats_.get_spare_unavailable();
 
-    // 在途请求
+    // In-flight requests
     oss << ",\"inFlightAtHorizon\":" << stats_.get_in_flight();
 
-    // 终端投递率（排除在途请求）
+    // Terminal delivery rate (excluding in-flight requests)
     uint64_t terminal_total = stats_.get_completed_requests() + stats_.get_failed_requests();
     double terminal_rate = 0.0;
     if (terminal_total > 0) {
@@ -341,7 +342,7 @@ void Simulator::emit_done_json() {
     }
     oss << ",\"terminalDeliveryRate\":" << std::fixed << std::setprecision(2) << terminal_rate;
 
-    // 路由失败率
+    // Route failure rate
     double route_fail_rate = 0.0;
     if (stats_.get_total_requests() > 0) {
         route_fail_rate = static_cast<double>(stats_.get_failed_requests()) * 100.0 /
@@ -357,37 +358,37 @@ void Simulator::emit_done_json() {
 
 void Simulator::initialize() {
     if (json_stream_mode_) {
-        std::cerr << "初始化仿真环境...\n";
+        std::cerr << "Initializing simulation environment...\n";
     } else {
-        std::cout << "初始化仿真环境...\n";
+        std::cout << "Initializing simulation environment...\n";
     }
 
-    // 创建网格
+    // Create grid
     grid_ = std::make_unique<Grid>(config_);
     grid_->initialize(rng_);
 
-    // 创建路由器
+    // Create router
     router_ = std::make_unique<Router>(*grid_, config_);
 
-    // 创建请求生成器
+    // Create request generator
     req_gen_ = std::make_unique<RequestGenerator>(config_, rng_);
     req_gen_->initialize_hotspots();
 
-    // 打印初始状态
+    // Print initial state
     auto& out = json_stream_mode_ ? std::cerr : std::cout;
-    out << "网格大小: " << grid_->get_grid_size() << "x" << grid_->get_grid_size()
-        << " x " << grid_->get_num_layers() << " 层\n";
-    out << "总TSV数: " << grid_->get_total_tsvs() << "\n";
-    out << "冗余TSV数: " << grid_->get_total_redundant_tsvs() << "\n";
+    out << "Grid size: " << grid_->get_grid_size() << "x" << grid_->get_grid_size()
+        << " x " << grid_->get_num_layers() << " layers\n";
+    out << "Total TSVs: " << grid_->get_total_tsvs() << "\n";
+    out << "Redundant TSVs: " << grid_->get_total_redundant_tsvs() << "\n";
 
-    // 更新初始失效统计
+    // Update initial failure statistics
     stats_.update_failure_stats(*grid_);
     if (config_.get_failure_mode() == FailureMode::INITIAL_ONLY ||
         config_.get_failure_mode() == FailureMode::COMBINED) {
-        out << "初始失效TSV数: " << grid_->count_failed_tsvs() << "\n";
+        out << "Initial failed TSVs: " << grid_->count_failed_tsvs() << "\n";
     }
 
-    out << "初始化完成\n\n";
+    out << "Initialization complete\n\n";
 }
 
 void Simulator::run() {
@@ -396,8 +397,8 @@ void Simulator::run() {
         emit_init_json();
         reset_cycle_accumulators();
 
-        std::cerr << "开始仿真 (JSON流模式)...\n";
-        std::cerr << "仿真周期: " << config_.get_simulation_cycles() << "\n\n";
+        std::cerr << "Starting simulation (JSON stream mode)...\n";
+        std::cerr << "Simulation cycles: " << config_.get_simulation_cycles() << "\n\n";
 
         uint64_t total_cycles = config_.get_simulation_cycles();
 
@@ -431,14 +432,47 @@ void Simulator::run() {
             }
         }
 
-        // 更新最终统计（emit_done_json之前）
+        // Drain phase: after cycle limit, stop generating new requests, let in-flight complete
+        if (!stop_requested_) {
+            while (!pending_requests_.empty() || !transmitting_requests_.empty()) {
+                poll_stdin_commands();
+                while (paused_ && !stop_requested_) {
+                    poll_stdin_commands();
+#ifdef __linux__
+                    usleep(1000);
+#endif
+                }
+                if (stop_requested_) break;
+
+                current_cycle_++;
+
+                // No new requests, only advance existing transmissions
+                update_transmitting_requests();
+                if (config_.get_failure_mode() == FailureMode::RUNTIME_ONLY ||
+                    config_.get_failure_mode() == FailureMode::COMBINED) {
+                    handle_runtime_failures();
+                }
+                process_pending_requests();
+
+                emit_cycle_json();
+                reset_cycle_accumulators();
+
+                if (steps_remaining_ > 0) {
+                    steps_remaining_--;
+                } else {
+                    paused_ = true;
+                }
+            }
+        }
+
+        // Update final statistics (before emit_done_json)
         stats_.update_failure_stats(*grid_);
 
-        // 记录在途请求数
+        // Record in-flight count (should be 0 after drain, unless manually stopped)
         uint64_t in_flight = pending_requests_.size() + transmitting_requests_.size();
         stats_.record_in_flight(in_flight);
 
-        // 复制旁路诊断计数器（从grid到stats，O(1)直接赋值）
+        // Copy bypass diagnostic counters (from grid to stats, O(1) assignment)
         stats_.set_failed_vertical_encounters(grid_->get_failed_vertical_encounters());
         stats_.set_spare_found(grid_->get_spare_found());
         stats_.set_spare_unavailable(grid_->get_spare_unavailable());
@@ -446,31 +480,42 @@ void Simulator::run() {
         emit_done_json();
     } else {
         // Normal mode (unchanged)
-        std::cout << "开始仿真...\n";
-        std::cout << "仿真周期: " << config_.get_simulation_cycles() << "\n\n";
+        std::cout << "Starting simulation...\n";
+        std::cout << "Simulation cycles: " << config_.get_simulation_cycles() << "\n\n";
 
         uint64_t total_cycles = config_.get_simulation_cycles();
-        uint64_t progress_interval = total_cycles / 20; // 每5%显示一次进度
+        uint64_t progress_interval = total_cycles / 20; // Show progress every 5%
 
         for (current_cycle_ = 0; current_cycle_ < total_cycles; ++current_cycle_) {
             simulate_cycle();
 
-            // 显示进度
+            // Show progress
             if (progress_interval > 0 && (current_cycle_ + 1) % progress_interval == 0) {
                 print_progress();
             }
         }
 
-        std::cout << "\n仿真完成!\n";
+        // Drain phase: stop generating new requests, let in-flight complete
+        while (!pending_requests_.empty() || !transmitting_requests_.empty()) {
+            current_cycle_++;
+            update_transmitting_requests();
+            if (config_.get_failure_mode() == FailureMode::RUNTIME_ONLY ||
+                config_.get_failure_mode() == FailureMode::COMBINED) {
+                handle_runtime_failures();
+            }
+            process_pending_requests();
+        }
 
-        // 更新最终统计
+        std::cout << "\nSimulation complete!\n";
+
+        // Update final statistics
         stats_.update_failure_stats(*grid_);
 
-        // 记录在途请求数
+        // Record in-flight count (should be 0 after drain)
         uint64_t in_flight = pending_requests_.size() + transmitting_requests_.size();
         stats_.record_in_flight(in_flight);
 
-        // 复制旁路诊断计数器（O(1)直接赋值）
+        // Copy bypass diagnostic counters (O(1) assignment)
         stats_.set_failed_vertical_encounters(grid_->get_failed_vertical_encounters());
         stats_.set_spare_found(grid_->get_spare_found());
         stats_.set_spare_unavailable(grid_->get_spare_unavailable());
@@ -478,19 +523,19 @@ void Simulator::run() {
 }
 
 void Simulator::simulate_cycle() {
-    // 1. 生成新请求
+    // 1. Generate new requests
     generate_new_requests();
 
-    // 2. 更新传输中的请求（检查是否到达下一跳）
+    // 2. Update transmitting requests (check if reached next hop)
     update_transmitting_requests();
 
-    // 3. 处理运行时失效（如果启用）
+    // 3. Handle runtime failures (if enabled)
     if (config_.get_failure_mode() == FailureMode::RUNTIME_ONLY ||
         config_.get_failure_mode() == FailureMode::COMBINED) {
         handle_runtime_failures();
     }
 
-    // 4. 处理待处理请求
+    // 4. Process pending requests
     process_pending_requests();
 }
 
@@ -572,14 +617,14 @@ void Simulator::handle_runtime_failures() {
 }
 
 void Simulator::process_pending_requests() {
-    // 处理队列中的所有请求
+    // Process all requests in the queue
     size_t queue_size = pending_requests_.size();
     for (size_t i = 0; i < queue_size; ++i) {
         Request req = pending_requests_.front();
         pending_requests_.pop();
 
         if (route_request(req)) {
-            // 路由成功，加入传输队列
+            // Route succeeded, add to transmit queue
             req.status = RequestStatus::TRANSMITTING;
             increment_path_usage(req.path);
 
@@ -596,7 +641,7 @@ void Simulator::process_pending_requests() {
 
             transmitting_requests_.push_back(req);
         } else {
-            // 路由失败
+            // Route failed
             req.status = RequestStatus::FAILED;
             stats_.record_request_failed(req);
 
@@ -612,23 +657,23 @@ void Simulator::process_pending_requests() {
 }
 
 bool Simulator::route_request(Request& req) {
-    // 使用路由器计算路径
+    // Use router to compute path
     auto result = router_->route(req.start, req.end, current_cycle_);
 
     if (!result.has_value()) {
-        // 路由失败
+        // Route failed
         return false;
     }
 
     auto [path, complete_time] = result.value();
 
-    // 更新请求信息
+    // Update request info
     req.path = path;
     req.current_hop = 0;
     req.next_hop_time = current_cycle_;
     req.complete_time = complete_time;
 
-    // 记录旁路使用次数（由Router在reconstruct_path中精确计数）
+    // Record bypass usage count (precisely counted by Router in reconstruct_path)
     for (uint32_t i = 0; i < router_->get_last_bypass_count(); ++i) {
         stats_.record_redundant_tsv_usage();
     }
@@ -637,15 +682,14 @@ bool Simulator::route_request(Request& req) {
 }
 
 bool Simulator::reroute_request(Request& req) {
-    // 从上一个已到达位置重新路由到终点
-    // 注意: current_hop已在update_transmitting_requests中递增,
-    // 指向失效的下一跳, 实际位置是current_hop-1
+    // Reroute from the last reached position to the destination
+    // Note: current_hop has been incremented in update_transmitting_requests,
+    // pointing to the failed next hop; actual position is current_hop-1
     Point actual_pos = (req.current_hop > 0) ? req.path[req.current_hop - 1] : req.path[0];
     auto result = router_->route(actual_pos, req.end, current_cycle_);
 
     if (!result.has_value()) {
-        // 重路由失败
-        return false;
+        // Reroute failed
     }
 
     auto [new_path, complete_time] = result.value();
@@ -656,18 +700,18 @@ bool Simulator::reroute_request(Request& req) {
         old_path_copy = req.path;
     }
 
-    // 更新路径（保留已到达的部分+新路径）
-    // actual_pos = path[current_hop-1], 新路径从actual_pos开始
+    // Update path (keep already-reached portion + new path)
+    // actual_pos = path[current_hop-1], new path starts from actual_pos
     size_t keep_up_to = (req.current_hop > 0) ? req.current_hop - 1 : 0;
     std::vector<Point> updated_path(req.path.begin(), req.path.begin() + static_cast<long>(keep_up_to) + 1);
     updated_path.insert(updated_path.end(), new_path.begin() + 1, new_path.end());
 
     req.path = updated_path;
-    req.current_hop = keep_up_to; // 回退到实际位置
-    req.next_hop_time = current_cycle_; // 重置跳转时间
+    req.current_hop = keep_up_to; // Reset to actual position
+    req.next_hop_time = current_cycle_; // Reset hop time
     req.complete_time = complete_time;
 
-    // 记录重路由段的旁路使用次数
+    // Record bypass usage count for rerouted segment
     for (uint32_t i = 0; i < router_->get_last_bypass_count(); ++i) {
         stats_.record_redundant_tsv_usage();
     }
@@ -694,19 +738,19 @@ bool Simulator::reroute_request(Request& req) {
 }
 
 void Simulator::update_transmitting_requests() {
-    // 使用迭代器遍历，以便在遍历过程中删除元素
+    // Use iterator traversal to allow element removal during iteration
     auto it = transmitting_requests_.begin();
     while (it != transmitting_requests_.end()) {
         Request& req = *it;
 
-        // 检查是否到达下一跳的时间
+        // Check if it's time to advance to the next hop
         if (current_cycle_ >= req.next_hop_time && req.current_hop < req.path.size()) {
-            // 移动到下一跳
+            // Advance to next hop
             req.current_hop++;
 
-            // 检查是否到达终点
+            // Check if destination reached
             if (req.current_hop >= req.path.size()) {
-                // 到达终点，标记为完成
+                // Reached destination, mark as completed
                 req.status = RequestStatus::COMPLETED;
                 req.completed = true;
                 req.complete_time = current_cycle_;
@@ -725,21 +769,21 @@ void Simulator::update_transmitting_requests() {
                 continue;
             }
 
-            // 检查下一跳的TSV是否失效（仅垂直移动需要检查，水平移动不使用TSV）
+            // Check if next hop TSV has failed (only vertical moves need checking; horizontal moves don't use TSVs)
             Point curr_pos = req.path[req.current_hop - 1];
             Point next_pos = req.path[req.current_hop];
             bool is_vertical_move = (curr_pos.z != next_pos.z);
             TSV* next_tsv = grid_->get_tsv(next_pos.x, next_pos.y, next_pos.z);
 
             if (is_vertical_move && next_tsv && next_tsv->is_failed()) {
-                // TSV失效，需要重新路由
+                // TSV failed, need to reroute
                 decrement_path_usage(req.path);
                 if (reroute_request(req)) {
-                    // 重路由成功，继续传输
+                    // Reroute succeeded, continue transmitting
                     increment_path_usage(req.path);
                     ++it;
                 } else {
-                    // 重路由失败，标记为失败
+                    // Reroute failed, mark as failed
                     req.status = RequestStatus::FAILED;
                     stats_.record_request_failed(req);
 
@@ -756,20 +800,20 @@ void Simulator::update_transmitting_requests() {
                 continue;
             }
 
-            // 计算到达下一跳的时间
+            // Calculate time to reach next hop
             if (req.current_hop > 0) {
                 Point prev_pos = req.path[req.current_hop - 1];
                 uint64_t hop_delay = static_cast<uint64_t>(
                     router_->calculate_path_delay({prev_pos, next_pos}));
 
-                // B4: 等待TSV空闲后再开始传输
+                // B4: Wait for TSV to be free before starting transmission
                 uint64_t start_time = current_cycle_;
                 if (next_tsv && next_tsv->get_available_at() > current_cycle_) {
                     start_time = next_tsv->get_available_at();
                 }
                 req.next_hop_time = start_time + hop_delay;
 
-                // 占用TSV
+                // Reserve the TSV
                 if (next_tsv) {
                     next_tsv->occupy_until(req.next_hop_time);
                 }
@@ -781,8 +825,8 @@ void Simulator::update_transmitting_requests() {
 }
 
 void Simulator::update_tsv_occupancy(const std::vector<Point>& path, uint64_t complete_time) {
-    // 标记路径上的所有TSV为占用状态（现在这个函数已经不再使用）
-    // 传输过程中逐跳占用TSV
+    // Mark all TSVs along the path as occupied (this function is no longer used).
+    // TSVs are now reserved hop by hop during transmission.
     for (const auto& point : path) {
         TSV* tsv = grid_->get_tsv(point.x, point.y, point.z);
         if (tsv) {
@@ -813,11 +857,11 @@ void Simulator::print_progress() const {
     double progress = static_cast<double>(current_cycle_ + 1) * 100.0 /
                      static_cast<double>(config_.get_simulation_cycles());
 
-    std::cout << "进度: " << std::fixed << std::setprecision(1) << progress << "% "
+    std::cout << "Progress: " << std::fixed << std::setprecision(1) << progress << "% "
               << "(" << current_cycle_ + 1 << "/" << config_.get_simulation_cycles() << ") "
-              << "请求: " << stats_.get_total_requests()
-              << " (完成: " << stats_.get_completed_requests()
-              << ", 失败: " << stats_.get_failed_requests() << ")\n";
+              << "Requests: " << stats_.get_total_requests()
+              << " (Completed: " << stats_.get_completed_requests()
+              << ", Failed: " << stats_.get_failed_requests() << ")\n";
 }
 
 } // namespace tsvra

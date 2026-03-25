@@ -15,6 +15,8 @@ export interface SimConfig {
   verticalDelay: number;
   horizontalDelay: number;
   totalCycles: number;
+  redundancy?: { layout: 'shared' | 'corner4' | 'none'; sparesPerLayer: number; redundancyRatio: number };
+  failureModel?: { type: 'uniform' | 'clustered'; clusterStrength: number; clusterRadius: number };
 }
 
 // TSV state
@@ -103,6 +105,7 @@ export interface DoneMessage {
 export interface RunningStats {
   pending: number;
   transmitting: number;
+  totalRequests: number;
   completed: number;
   failed: number;
   failedTSVs: number;

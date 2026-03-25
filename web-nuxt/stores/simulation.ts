@@ -64,11 +64,14 @@ export const useSimulationStore = defineStore('simulation', () => {
   // Cumulative traffic: 3D array [z][y][x] tracking total path usage per layer
   const cumulativeTraffic = shallowRef<number[][][] | null>(null);
 
+  // Reroute display paths: persist for 1000 cycles after request completes/fails
+  const rerouteDisplayPaths = shallowRef<Map<number, { path: [number, number, number][]; expireCycle: number }>>(new Map());
+
   // Heatmap update interval (in cycles)
   const heatmapUpdateInterval = ref(10);
 
   // Initialize preview grid from form defaults (before any simulation runs)
-  function initializePreview(gridFactor = 4, numLayers = 2) {
+  function initializePreview(gridFactor = 4, numLayers = 2, redundancyLayout: 'shared' | 'none' = 'shared') {
     const gridSize = 4 * gridFactor;
     const previewConfig: SimConfig = {
       gridSize,
@@ -79,6 +82,7 @@ export const useSimulationStore = defineStore('simulation', () => {
       verticalDelay: 1,
       horizontalDelay: 1000,
       totalCycles: 10000,
+      redundancy: { layout: redundancyLayout, sparesPerLayer: 0, redundancyRatio: 0 },
     };
 
     const newGrid: TSVState[][][] = [];
@@ -87,8 +91,11 @@ export const useSimulationStore = defineStore('simulation', () => {
       for (let y = 0; y < gridSize; y++) {
         newGrid[z][y] = [];
         for (let x = 0; x < gridSize; x++) {
-          const lx = x % 4, ly = y % 4;
-          const redundant = (lx === 0 || lx === 3) && (ly === 0 || ly === 3);
+          let redundant = false;
+          if (redundancyLayout === 'shared' && gridFactor > 1) {
+            const stride = gridFactor - 1;
+            redundant = x >= 1 && y >= 1 && (x - 1) % stride === 0 && (y - 1) % stride === 0;
+          }
           newGrid[z][y][x] = { x, y, z, redundant, failed: false, usageCount: 0 };
         }
       }
@@ -207,6 +214,7 @@ export const useSimulationStore = defineStore('simulation', () => {
     totalCycles.value = msgConfig.totalCycles;
     simStatus.value = speedMode.value === 'step' ? 'stepping' : 'running';
     activeRequests.value = new Map();
+    rerouteDisplayPaths.value = new Map();
     completedCount.value = 0;
     failedCount.value = 0;
     currentCycle.value = 0;
@@ -249,6 +257,40 @@ export const useSimulationStore = defineStore('simulation', () => {
       triggerRef(cumulativeTraffic);
     }
 
+    // Mark rerouted requests and update their paths (BEFORE removal so reroute+complete in same cycle works)
+    for (const rr of events.reroutes) {
+      const req = newActiveRequests.get(rr.requestId);
+      if (req) {
+        req.rerouted = true;
+        req.path = rr.newPath;
+      }
+    }
+
+    // Manage reroute display paths (persist 1000 cycles after completion/failure)
+    const newReroutePaths = new Map(rerouteDisplayPaths.value);
+    // Add new reroutes (expireCycle = Infinity while request is still active)
+    for (const rr of events.reroutes) {
+      newReroutePaths.set(rr.requestId, { path: rr.newPath, expireCycle: Infinity });
+    }
+    // Set expiry for completed/failed rerouted requests
+    for (const req of events.completed) {
+      if (newReroutePaths.has(req.id)) {
+        newReroutePaths.get(req.id)!.expireCycle = cycle + 1000;
+      }
+    }
+    for (const req of events.failed) {
+      if (newReroutePaths.has(req.id)) {
+        newReroutePaths.get(req.id)!.expireCycle = cycle + 1000;
+      }
+    }
+    // Prune expired entries
+    for (const [id, entry] of newReroutePaths) {
+      if (cycle > entry.expireCycle) {
+        newReroutePaths.delete(id);
+      }
+    }
+    rerouteDisplayPaths.value = newReroutePaths;
+
     // Remove completed
     for (const req of events.completed) {
       newActiveRequests.delete(req.id);
@@ -257,15 +299,6 @@ export const useSimulationStore = defineStore('simulation', () => {
     // Remove failed
     for (const req of events.failed) {
       newActiveRequests.delete(req.id);
-    }
-
-    // Mark rerouted requests and update their paths
-    for (const rr of events.reroutes) {
-      const req = newActiveRequests.get(rr.requestId);
-      if (req) {
-        req.rerouted = true;
-        req.path = rr.newPath;
-      }
     }
 
     // Update grid failures — mutate in-place instead of deep-copying
@@ -318,6 +351,7 @@ export const useSimulationStore = defineStore('simulation', () => {
     lastCycleUpdate.value = null;
     initializePreview();
     activeRequests.value = new Map();
+    rerouteDisplayPaths.value = new Map();
     completedCount.value = 0;
     failedCount.value = 0;
     recentCompleted.value = [];
@@ -354,6 +388,7 @@ export const useSimulationStore = defineStore('simulation', () => {
     tsvGrid,
     hotspotWeights,
     activeRequests,
+    rerouteDisplayPaths,
     completedCount,
     failedCount,
     recentCompleted,

@@ -32,7 +32,7 @@ Config::Config()
 bool Config::load_from_file(const std::string& filename) {
     std::ifstream file(filename);
     if (!file.is_open()) {
-        std::cerr << "无法打开配置文件: " << filename << std::endl;
+        std::cerr << "Cannot open config file: " << filename << std::endl;
         return false;
     }
 
@@ -96,30 +96,30 @@ bool Config::parse_command_line(int argc, char* argv[]) {
         std::string arg = argv[i];
 
         if (arg == "--help" || arg == "-h") {
-            std::cout << "TSVRA - TSV路由模拟器\n"
-                      << "用法: tsvra [选项]\n"
-                      << "选项:\n"
-                      << "  --config <file>           从文件加载配置\n"
-                      << "  --layers <n>              层数 (默认: 4)\n"
-                      << "  --grid-factor <n>         网格因子 (默认: 4, 网格大小 = 4*n)\n"
-                      << "  --failure-mode <a|b|c>    失效模式 (默认: a)\n"
-                      << "  --failure-rate <rate>     失效率 (默认: 1e-5)\n"
-                      << "  --vertical-delay <n>      垂直延迟 (默认: 5)\n"
-                      << "  --horizontal-delay <n>    水平延迟 (默认: 500)\n"
-                      << "  --cycles <n>              仿真周期数 (默认: 100000)\n"
-                      << "  --output <prefix>         输出文件前缀 (默认: tsvra_output)\n"
-                      << "  --seed <n>                随机数种子 (默认: 0=随机)\n"
-                      << "  --lambda1 <v>             拥塞权重λ1 (默认: 0.0=禁用)\n"
-                      << "  --lambda2 <v>             风险权重λ2 (默认: 0.0=禁用)\n"
-                      << "  --max-path-length <n>     最大路径跳数L_max (默认: 0=不限制)\n"
-                      << "  --reliability-min <v>     最小路径可靠性R_min (默认: 0.0=不约束)\n"
-                      << "  --redundancy <layout>     冗余布局: corner4|shared|none (默认: shared)\n"
-                      << "  --failure-model <model>   失效模型: uniform|clustered (默认: uniform)\n"
-                      << "  --cluster-strength <v>    聚集强度 [0.0-1.0] (默认: 0.8)\n"
-                      << "  --cluster-radius <n>      聚集半径 ≥1 (默认: 4)\n"
-                      << "  --json-stream             启用JSON流式输出模式\n"
-                      << "  --print-defaults          输出默认配置JSON并退出\n"
-                      << "  -h, --help                显示帮助信息\n";
+            std::cout << "TSVRA - TSV Routing Simulator\n"
+                      << "Usage: tsvra [options]\n"
+                      << "Options:\n"
+                      << "  --config <file>           Load config from file\n"
+                      << "  --layers <n>              Number of layers (default: 4)\n"
+                      << "  --grid-factor <n>         Grid factor (default: 4, grid size = 4*n)\n"
+                      << "  --failure-mode <a|b|c>    Failure mode (default: a)\n"
+                      << "  --failure-rate <rate>      Failure rate (default: 1e-5)\n"
+                      << "  --vertical-delay <n>      Vertical delay (default: 5)\n"
+                      << "  --horizontal-delay <n>    Horizontal delay (default: 500)\n"
+                      << "  --cycles <n>              Simulation cycles (default: 100000)\n"
+                      << "  --output <prefix>         Output file prefix (default: tsvra_output)\n"
+                      << "  --seed <n>                Random seed (default: 0=random)\n"
+                      << "  --lambda1 <v>             Congestion weight lambda1 (default: 0.0=disabled)\n"
+                      << "  --lambda2 <v>             Risk weight lambda2 (default: 0.0=disabled)\n"
+                      << "  --max-path-length <n>     Max path hops L_max (default: 0=unlimited)\n"
+                      << "  --reliability-min <v>     Min path reliability R_min (default: 0.0=unconstrained)\n"
+                      << "  --redundancy <layout>     Redundancy layout: corner4|shared|none (default: shared)\n"
+                      << "  --failure-model <model>   Failure model: uniform|clustered (default: uniform)\n"
+                      << "  --cluster-strength <v>    Cluster strength [0.0-1.0] (default: 0.8)\n"
+                      << "  --cluster-radius <n>      Cluster radius >=1 (default: 4)\n"
+                      << "  --json-stream             Enable JSON streaming output mode\n"
+                      << "  --print-defaults          Print default config JSON and exit\n"
+                      << "  -h, --help                Show help\n";
             return false;
         } else if (arg == "--print-defaults") {
             print_defaults_ = true;
@@ -169,52 +169,57 @@ bool Config::parse_command_line(int argc, char* argv[]) {
 
 bool Config::validate() const {
     if (num_layers_ < 2) {
-        std::cerr << "错误: 层数必须至少为2" << std::endl;
+        std::cerr << "Error: num_layers must be at least 2" << std::endl;
         return false;
     }
 
     if (grid_factor_ < 1) {
-        std::cerr << "错误: 网格因子必须至少为1" << std::endl;
+        std::cerr << "Error: grid_factor must be at least 1" << std::endl;
+        return false;
+    }
+
+    if (redundancy_layout_ == RedundancyLayout::SHARED_SPARE && grid_factor_ < 3) {
+        std::cerr << "Error: SharedSpare layout requires grid_factor >= 3" << std::endl;
         return false;
     }
 
     if (failure_rate_ < 0.0 || failure_rate_ > 1.0) {
-        std::cerr << "错误: 失效率必须在0到1之间" << std::endl;
+        std::cerr << "Error: failure_rate must be between 0 and 1" << std::endl;
         return false;
     }
 
     if (vertical_delay_ == 0 || horizontal_delay_ == 0) {
-        std::cerr << "错误: 传输延迟必须大于0" << std::endl;
+        std::cerr << "Error: transmission delay must be > 0" << std::endl;
         return false;
     }
 
     if (simulation_cycles_ == 0) {
-        std::cerr << "错误: 仿真周期数必须大于0" << std::endl;
+        std::cerr << "Error: simulation_cycles must be > 0" << std::endl;
         return false;
     }
 
     if (lambda1_ < 0.0) {
-        std::cerr << "错误: 拥塞权重λ1不能为负数" << std::endl;
+        std::cerr << "Error: congestion weight lambda1 must not be negative" << std::endl;
         return false;
     }
 
     if (lambda2_ < 0.0) {
-        std::cerr << "错误: 风险权重λ2不能为负数" << std::endl;
+        std::cerr << "Error: risk weight lambda2 must not be negative" << std::endl;
         return false;
     }
 
     if (reliability_min_ < 0.0 || reliability_min_ > 1.0) {
-        std::cerr << "错误: 最小可靠性R_min必须在0到1之间" << std::endl;
+        std::cerr << "Error: reliability_min must be between 0 and 1" << std::endl;
         return false;
     }
 
     if (cluster_params_.strength < 0.0 || cluster_params_.strength > 1.0) {
-        std::cerr << "错误: 聚集强度cluster_strength必须在[0.0, 1.0]之间" << std::endl;
+        std::cerr << "Error: cluster_strength must be in [0.0, 1.0]" << std::endl;
         return false;
     }
 
     if (cluster_params_.radius < 1) {
-        std::cerr << "错误: 聚集半径cluster_radius必须≥1" << std::endl;
+        std::cerr << "Error: cluster_radius must be >= 1" << std::endl;
         return false;
     }
 
@@ -222,27 +227,27 @@ bool Config::validate() const {
 }
 
 void Config::print() const {
-    std::cout << "=== TSVRA 配置 ===\n"
-              << "层数: " << num_layers_ << "\n"
-              << "网格因子: " << grid_factor_ << " (网格大小: " << get_grid_size() << "x" << get_grid_size() << ")\n"
-              << "失效模式: " << failure_mode_to_string(failure_mode_) << "\n"
-              << "失效率: " << failure_rate_ << "\n"
-              << "垂直延迟: " << vertical_delay_ << "\n"
-              << "水平延迟: " << horizontal_delay_ << "\n"
-              << "仿真周期: " << simulation_cycles_ << "\n"
-              << "输出前缀: " << output_prefix_ << "\n"
-              << "随机种子: " << (random_seed_ == 0 ? "随机" : std::to_string(random_seed_)) << "\n"
-              << "拥塞权重λ1: " << lambda1_ << (lambda1_ == 0.0 ? " (禁用)" : "") << "\n"
-              << "风险权重λ2: " << lambda2_ << (lambda2_ == 0.0 ? " (禁用)" : "") << "\n"
-              << "最大路径长度L_max: " << (max_path_length_ == 0 ? "不限制" : std::to_string(max_path_length_)) << "\n"
-              << "最小可靠性R_min: " << reliability_min_ << (reliability_min_ == 0.0 ? " (不约束)" : "") << "\n"
-              << "冗余布局: " << redundancy_layout_to_string(redundancy_layout_) << "\n"
-              << "失效模型: " << failure_model_to_string(failure_model_) << "\n";
+    std::cout << "=== TSVRA Config ===\n"
+              << "Layers: " << num_layers_ << "\n"
+              << "Grid factor: " << grid_factor_ << " (grid size: " << get_grid_size() << "x" << get_grid_size() << ")\n"
+              << "Failure mode: " << failure_mode_to_string(failure_mode_) << "\n"
+              << "Failure rate: " << failure_rate_ << "\n"
+              << "Vertical delay: " << vertical_delay_ << "\n"
+              << "Horizontal delay: " << horizontal_delay_ << "\n"
+              << "Simulation cycles: " << simulation_cycles_ << "\n"
+              << "Output prefix: " << output_prefix_ << "\n"
+              << "Random seed: " << (random_seed_ == 0 ? "random" : std::to_string(random_seed_)) << "\n"
+              << "Congestion weight lambda1: " << lambda1_ << (lambda1_ == 0.0 ? " (disabled)" : "") << "\n"
+              << "Risk weight lambda2: " << lambda2_ << (lambda2_ == 0.0 ? " (disabled)" : "") << "\n"
+              << "Max path length L_max: " << (max_path_length_ == 0 ? "unlimited" : std::to_string(max_path_length_)) << "\n"
+              << "Min reliability R_min: " << reliability_min_ << (reliability_min_ == 0.0 ? " (unconstrained)" : "") << "\n"
+              << "Redundancy layout: " << redundancy_layout_to_string(redundancy_layout_) << "\n"
+              << "Failure model: " << failure_model_to_string(failure_model_) << "\n";
     if (failure_model_ == FailureModel::CLUSTERED) {
-        std::cout << "  聚集强度: " << cluster_params_.strength << "\n"
-                  << "  聚集半径: " << cluster_params_.radius << "\n";
+        std::cout << "  Cluster strength: " << cluster_params_.strength << "\n"
+                  << "  Cluster radius: " << cluster_params_.radius << "\n";
     }
-    std::cout << "==================\n";
+    std::cout << "====================\n";
 }
 
 std::string Config::to_json() const {

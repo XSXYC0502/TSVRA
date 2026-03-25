@@ -18,7 +18,7 @@ Grid::Grid(const Config& config)
 }
 
 void Grid::initialize(std::mt19937& rng) {
-    // 分配网格空间 [z][y][x]
+    // Allocate grid space [z][y][x]
     grid_.resize(num_layers_);
     for (uint32_t z = 0; z < num_layers_; ++z) {
         grid_[z].resize(grid_size_);
@@ -35,24 +35,25 @@ void Grid::initialize(std::mt19937& rng) {
         }
     }
 
-    // 构建覆盖模型
+    // Build coverage model
     build_spare_sites();
 
-    // 根据失效模式应用初始失效
+    // Apply initial failures based on failure mode
     if (config_.get_failure_mode() == FailureMode::INITIAL_ONLY ||
         config_.get_failure_mode() == FailureMode::COMBINED) {
         apply_initial_failures(rng);
     }
 }
 
-// ===== Phase B: 覆盖模型 =====
+// ===== Phase B: Coverage Model =====
 
 uint32_t Grid::get_region_id(int32_t x, int32_t y) const {
     if (redundancy_layout_ == RedundancyLayout::SHARED_SPARE) {
-        // 重叠块模型：块数 = (grid_size_ - 2) / 3 + 1
-        uint32_t blocks_per_row = (grid_size_ >= 2) ? (grid_size_ - 2) / 3 + 1 : 1;
-        uint32_t bi = std::min(static_cast<uint32_t>(std::max(x, 0) / 3), blocks_per_row - 1);
-        uint32_t bj = std::min(static_cast<uint32_t>(std::max(y, 0) / 3), blocks_per_row - 1);
+        uint32_t gf = config_.get_grid_factor();
+        uint32_t stride = (gf > 1) ? gf - 1 : 1;
+        uint32_t blocks_per_row = (grid_size_ >= 2) ? (grid_size_ - 2) / stride + 1 : 1;
+        uint32_t bi = std::min(static_cast<uint32_t>(std::max(x, 0) / stride), blocks_per_row - 1);
+        uint32_t bj = std::min(static_cast<uint32_t>(std::max(y, 0) / stride), blocks_per_row - 1);
         return bi * blocks_per_row + bj;
     }
     uint32_t regions_per_row = grid_size_ / 4;
@@ -78,7 +79,7 @@ void Grid::build_spare_sites() {
 
 void Grid::build_legacy_corner4_sites() {
     uint32_t regions_per_row = grid_size_ / 4;
-    // LegacyCorner4: 每个区域4个角冗余，每个只覆盖自己的区域
+    // LegacyCorner4: each region has 4 corner redundant TSVs, each covering only its own region
     for (uint32_t z = 0; z < num_layers_; ++z) {
         for (uint32_t ri = 0; ri < regions_per_row; ++ri) {
             for (uint32_t rj = 0; rj < regions_per_row; ++rj) {
@@ -86,7 +87,7 @@ void Grid::build_legacy_corner4_sites() {
                 int32_t bx = static_cast<int32_t>(ri * 4);
                 int32_t by = static_cast<int32_t>(rj * 4);
 
-                // 4个角位置
+                // 4 corner positions
                 Point corners[4] = {
                     {bx, by, static_cast<int32_t>(z)},
                     {bx + 3, by, static_cast<int32_t>(z)},
@@ -105,17 +106,21 @@ void Grid::build_legacy_corner4_sites() {
 }
 
 void Grid::build_shared_spare_sites() {
-    // 重叠4×4块，步幅3。块(bi,bj)覆盖[3*bi, 3*bi+3]×[3*bj, 3*bj+3]
-    // 冗余位于(1+3*bi, 1+3*bj)
-    uint32_t blocks_per_row = (grid_size_ >= 2) ? (grid_size_ - 2) / 3 + 1 : 0;
+    // Overlapping blocks, stride = grid_factor - 1. Block (bi,bj) covers [stride*bi, stride*bi+stride]
+    // Redundant TSV located at (1+stride*bi, 1+stride*bj)
+    uint32_t gf = config_.get_grid_factor();
+    if (gf <= 1) return; // No redundancy when grid_factor=1
+    uint32_t stride = gf - 1;
+    uint32_t blocks_per_row = (grid_size_ >= 2) ? (grid_size_ - 2) / stride + 1 : 0;
     uint32_t total_blocks = blocks_per_row * blocks_per_row;
     region_to_spares_.resize(total_blocks);
 
     for (uint32_t z = 0; z < num_layers_; ++z) {
         for (uint32_t bi = 0; bi < blocks_per_row; ++bi) {
             for (uint32_t bj = 0; bj < blocks_per_row; ++bj) {
-                int32_t sx = static_cast<int32_t>(1 + 3 * bi);
-                int32_t sy = static_cast<int32_t>(1 + 3 * bj);
+                int32_t sx = static_cast<int32_t>(1 + stride * bi);
+                int32_t sy = static_cast<int32_t>(1 + stride * bj);
+                if (sx >= static_cast<int32_t>(grid_size_) || sy >= static_cast<int32_t>(grid_size_)) continue;
                 Point pos{sx, sy, static_cast<int32_t>(z)};
 
                 uint32_t block_id = bi * blocks_per_row + bj;
@@ -153,26 +158,29 @@ std::optional<Point> Grid::find_bypass_spare(Point failed_tsv, uint64_t current_
 }
 
 std::optional<Point> Grid::select_spare(Point failed_tsv, uint64_t current_time) const {
-    // 重叠块模型：一个TSV可能属于多个块，需要搜索所有包含它的块的冗余
-    uint32_t blocks_per_row = (grid_size_ >= 2) ? (grid_size_ - 2) / 3 + 1 : 0;
+    // Overlapping block model: a TSV may belong to multiple blocks, need to search spares in all containing blocks
+    uint32_t gf = config_.get_grid_factor();
+    if (gf <= 1) return std::nullopt;
+    uint32_t stride = gf - 1;
+    uint32_t blocks_per_row = (grid_size_ >= 2) ? (grid_size_ - 2) / stride + 1 : 0;
     if (blocks_per_row == 0) return std::nullopt;
 
     double min_dist = std::numeric_limits<double>::max();
     std::optional<Point> best;
 
-    // 找到所有包含(failed_tsv.x, failed_tsv.y)的块
-    // 块(bi,bj)覆盖 [3*bi, 3*bi+3]
+    // Find all blocks containing (failed_tsv.x, failed_tsv.y)
+    // Block (bi,bj) covers [stride*bi, stride*bi+stride]
     for (uint32_t bi = 0; bi < blocks_per_row; ++bi) {
-        int32_t bx_start = static_cast<int32_t>(3 * bi);
-        int32_t bx_end = bx_start + 3;
+        int32_t bx_start = static_cast<int32_t>(stride * bi);
+        int32_t bx_end = bx_start + static_cast<int32_t>(stride);
         if (failed_tsv.x < bx_start || failed_tsv.x > bx_end) continue;
 
         for (uint32_t bj = 0; bj < blocks_per_row; ++bj) {
-            int32_t by_start = static_cast<int32_t>(3 * bj);
-            int32_t by_end = by_start + 3;
+            int32_t by_start = static_cast<int32_t>(stride * bj);
+            int32_t by_end = by_start + static_cast<int32_t>(stride);
             if (failed_tsv.y < by_start || failed_tsv.y > by_end) continue;
 
-            // failed_tsv属于块(bi,bj)，搜索该块的冗余
+            // failed_tsv belongs to block (bi,bj), search its spares
             uint32_t block_id = bi * blocks_per_row + bj;
             if (block_id >= region_to_spares_.size()) continue;
 
@@ -195,10 +203,10 @@ std::optional<Point> Grid::select_spare(Point failed_tsv, uint64_t current_time)
     return best;
 }
 
-// ===== Phase C: 均值保持聚集失效采样 =====
+// ===== Phase C: Mean-Preserving Clustered Failure Sampling =====
 
 std::vector<Point> Grid::sample_failures(std::mt19937& rng, bool runtime) {
-    // 收集合格TSV（非顶层；若runtime则排除已失效）
+    // Collect eligible TSVs (not top layer; if runtime, exclude already-failed)
     std::vector<Point> eligible;
     for (uint32_t z = 0; z < num_layers_ - 1; ++z) {
         for (uint32_t y = 0; y < grid_size_; ++y) {
@@ -212,7 +220,7 @@ std::vector<Point> Grid::sample_failures(std::mt19937& rng, bool runtime) {
 
     if (eligible.empty()) return {};
 
-    // 步骤1：从Binomial(N, failure_rate)采样失效数量（均值保持）
+    // Step 1: Sample failure count from Binomial(N, failure_rate) (mean-preserving)
     std::binomial_distribution<uint32_t> binom(static_cast<uint32_t>(eligible.size()), failure_rate_);
     uint32_t k = binom(rng);
     if (k == 0) return {};
@@ -225,22 +233,22 @@ std::vector<Point> Grid::sample_failures(std::mt19937& rng, bool runtime) {
     uint32_t radius = cluster_params_.radius;
 
     if (strength == 0.0) {
-        // 纯均匀：洗牌后取前k个
+        // Pure uniform: shuffle and take first k
         std::shuffle(eligible.begin(), eligible.end(), rng);
         failures.assign(eligible.begin(), eligible.begin() + k);
     } else {
-        // 聚集放置：逐次加权无放回抽样
-        // 第一个失效：均匀随机
+        // Clustered placement: sequential weighted sampling without replacement
+        // First failure: uniform random
         std::uniform_int_distribution<size_t> uniform_idx(0, eligible.size() - 1);
         size_t first_idx = uniform_idx(rng);
         failures.push_back(eligible[first_idx]);
         eligible.erase(eligible.begin() + static_cast<ptrdiff_t>(first_idx));
 
-        // 后续失效：按核函数加权
+        // Subsequent failures: weighted by kernel function
         for (uint32_t i = 1; i < k && !eligible.empty(); ++i) {
             std::vector<double> weights(eligible.size());
             for (size_t j = 0; j < eligible.size(); ++j) {
-                // d_min = 到已选失效点的最小曼哈顿距离
+                // d_min = minimum Manhattan distance to already-selected failure points
                 double d_min = std::numeric_limits<double>::max();
                 for (const auto& f : failures) {
                     double d = std::abs(eligible[j].x - f.x) +
@@ -276,7 +284,7 @@ void Grid::apply_runtime_failure(std::mt19937& rng) {
     }
 }
 
-// ===== 原有方法 =====
+// ===== Original Methods =====
 
 TSV* Grid::get_tsv(int32_t x, int32_t y, int32_t z) {
     if (!is_valid_position(x, y, z)) return nullptr;
@@ -343,14 +351,17 @@ uint32_t Grid::get_total_redundant_tsvs() const {
 bool Grid::is_redundant_position(int32_t x, int32_t y) const {
     switch (redundancy_layout_) {
         case RedundancyLayout::LEGACY_CORNER4: {
-            // 每个4x4区域的四个角是冗余TSV
+            // Four corners of each 4x4 region are redundant TSVs
             int32_t mod_x = x % 4;
             int32_t mod_y = y % 4;
             return (mod_x == 0 || mod_x == 3) && (mod_y == 0 || mod_y == 3);
         }
         case RedundancyLayout::SHARED_SPARE: {
-            // 重叠4×4块，步幅3，冗余位于(1+3i, 1+3j)
-            return (x >= 1) && (y >= 1) && ((x - 1) % 3 == 0) && ((y - 1) % 3 == 0);
+            // Overlapping blocks, stride = grid_factor - 1, spare at (1+stride*i, 1+stride*j)
+            uint32_t gf = config_.get_grid_factor();
+            if (gf <= 1) return false;
+            uint32_t stride = gf - 1;
+            return (x >= 1) && (y >= 1) && ((x - 1) % static_cast<int32_t>(stride) == 0) && ((y - 1) % static_cast<int32_t>(stride) == 0);
         }
         case RedundancyLayout::NONE:
             return false;

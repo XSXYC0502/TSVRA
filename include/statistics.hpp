@@ -10,41 +10,41 @@
 
 namespace tsvra {
 
-// 统计数据类
+// Statistics class
 class Statistics {
 public:
     explicit Statistics(const Config& config);
     
-    // 记录请求
+    // Record requests
     void record_request_generated();
     void record_request_completed(const Request& req);
     void record_request_failed(const Request& req);
     
-    // 记录TSV使用
+    // Record TSV usage
     void record_redundant_tsv_usage();
 
-    // 记录旁路诊断
+    // Record bypass diagnostics
     void record_failed_vertical_encounter();
     void record_spare_found();
     void record_spare_unavailable();
 
-    // 直接设置旁路诊断计数器（从Grid批量拷贝时使用）
+    // Directly set bypass diagnostic counters (used when bulk-copying from Grid)
     void set_failed_vertical_encounters(uint64_t v) { failed_vertical_encounters_ = v; }
     void set_spare_found(uint64_t v) { spare_found_ = v; }
     void set_spare_unavailable(uint64_t v) { spare_unavailable_ = v; }
 
-    // 记录在途请求（仿真结束时）
+    // Record in-flight requests (at simulation end)
     void record_in_flight(uint64_t count);
 
-    // 更新失效统计
+    // Update failure statistics
     void update_failure_stats(const Grid& grid);
     
-    // 输出统计信息
+    // Output statistics
     void print_summary() const;
     void export_to_csv(const std::string& filename) const;
     void export_requests_to_csv(const std::string& filename) const;
     
-    // 获取统计数据
+    // Get statistics data
     uint64_t get_total_requests() const { return total_requests_; }
     uint64_t get_completed_requests() const { return completed_requests_; }
     uint64_t get_failed_requests() const { return failed_requests_; }
@@ -65,18 +65,18 @@ public:
 private:
     const Config& config_;
     
-    // 请求统计
+    // Request statistics
     uint64_t total_requests_;
     uint64_t completed_requests_;
     uint64_t failed_requests_;
     
-    // 延迟统计
+    // Latency statistics
     uint64_t total_latency_;
     uint64_t max_latency_;
     uint64_t min_latency_;
     std::vector<uint64_t> latency_samples_;
     
-    // TSV统计
+    // TSV statistics
     uint64_t redundant_tsv_usages_;
     uint64_t failed_vertical_encounters_;
     uint64_t spare_found_;
@@ -85,7 +85,7 @@ private:
     uint32_t current_failed_tsvs_;
     uint32_t current_failed_redundant_tsvs_;
     
-    // 请求记录（用于导出）
+    // Request records (for export)
     std::vector<Request> completed_requests_list_;
     std::vector<Request> failed_requests_list_;
 };

@@ -12,7 +12,7 @@ import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
 import type { ColorMode } from '~/types/simulation';
 
 const store = useSimulationStore();
-const { tsvGrid, config, colorMode, activeRequests, activeView, cumulativeTraffic } = storeToRefs(store);
+const { tsvGrid, config, colorMode, activeRequests, rerouteDisplayPaths, activeView, cumulativeTraffic } = storeToRefs(store);
 
 const layerSpacing = 3;
 
@@ -59,17 +59,17 @@ const trafficMap = computed(() => {
   return { traffic, maxUsage };
 });
 
-// Request paths for visualization
-const requestPathLines = computed(() => {
-  const reqs = Array.from(activeRequests.value.values()).slice(0, 50);
+// Reroute paths — from persistent display paths (persist 1000 cycles after completion/failure)
+const reroutePathLines = computed(() => {
   const half = gridSize.value / 2;
-  return reqs
-    .filter(req => req.rerouted && req.path && req.path.length >= 2)
-    .map(req => {
-      const pts = req.path.map(
+  const entries = Array.from(rerouteDisplayPaths.value.values()).slice(0, 50);
+  return entries
+    .filter(entry => entry.path && entry.path.length >= 2)
+    .map((entry, i) => {
+      const pts = entry.path.map(
         ([x, y, z]) => new THREE.Vector3(x - half + 0.5, z * layerSpacing + 0.2, y - half + 0.5)
       );
-      return { id: req.id, points: pts };
+      return { id: i, points: pts };
     });
 });
 
@@ -136,7 +136,7 @@ function buildScene() {
   const lineGeom = new LineSegmentsGeometry();
   const lineMat = new LineMaterial({
     color: 0xffffff,
-    linewidth: 3,
+    linewidth: 1,
   });
   lineMat.resolution.set(el.clientWidth, el.clientHeight);
   gridFrame = new LineSegments2(lineGeom, lineMat);
@@ -149,7 +149,7 @@ function buildScene() {
   // Initial update
   updateGridFrame();
   updateLayerMeshes();
-  updatePaths();
+  updateReroutePaths();
 
   // Start animation loop
   startAnimation();
@@ -187,6 +187,15 @@ function stopAnimation() {
   }
 }
 
+function getGridLinePositions(size: number, layout: string, gridFactor: number): number[] {
+  const positions: number[] = [];
+  if (layout === 'shared' && gridFactor > 1) {
+    const stride = gridFactor - 1;
+    for (let i = 0; 1 + stride * i < size; i++) positions.push(1 + stride * i);
+  }
+  return positions;
+}
+
 function updateGridFrame() {
   if (!gridFrame) return;
   const size = gridSize.value;
@@ -195,13 +204,24 @@ function updateGridFrame() {
 
   const pts: number[] = [];
   const half = size / 2;
-  const numRegions = size / 4;
+  const layout = config.value?.redundancy?.layout ?? 'shared';
+  const gf = config.value?.gridFactor ?? 4;
+  const linePositions = getGridLinePositions(size, layout, gf);
+
   for (let layer = 0; layer < layers; layer++) {
     const y = layer * layerSpacing;
-    for (let i = 0; i <= numRegions; i++) {
-      const pos = i * 4 - half;
-      pts.push(-half, y - 0.15, pos, half, y - 0.15, pos);
-      pts.push(pos, y - 0.15, -half, pos, y - 0.15, half);
+
+    // Outer boundary (edge-aligned, above blocks)
+    pts.push(-half, y + 0.16, -half, half, y + 0.16, -half);
+    pts.push(-half, y + 0.16, half, half, y + 0.16, half);
+    pts.push(-half, y + 0.16, -half, -half, y + 0.16, half);
+    pts.push(half, y + 0.16, -half, half, y + 0.16, half);
+
+    // Internal lines through spare/redundant positions (cell-center aligned, above blocks)
+    for (const pos of linePositions) {
+      const worldPos = pos - half + 0.5;
+      pts.push(-half, y + 0.16, worldPos, half, y + 0.16, worldPos);
+      pts.push(worldPos, y + 0.16, -half, worldPos, y + 0.16, half);
     }
   }
 
@@ -250,7 +270,7 @@ function updateLayerMeshes() {
   }
 }
 
-function updatePaths() {
+function updateReroutePaths() {
   if (!pathsGroup) return;
 
   // Clear existing lines
@@ -263,7 +283,7 @@ function updatePaths() {
 
   // Add new lines
   const lineMaterial = new THREE.LineBasicMaterial({ color: '#ff6600', transparent: true, opacity: 0.8 });
-  for (const pathData of requestPathLines.value) {
+  for (const pathData of reroutePathLines.value) {
     const geometry = new THREE.BufferGeometry().setFromPoints(pathData.points);
     const line = new THREE.Line(geometry, lineMaterial.clone());
     pathsGroup.add(line);
@@ -365,6 +385,8 @@ watch(
 // Update colors/positions reactively when cycle data changes
 // Use rAF-based throttle to avoid excessive Three.js updates
 let updatePending = false;
+let needsLayerUpdate = false;
+let needsRerouteUpdate = false;
 let prevColorMode = colorMode.value;
 watch(
   [() => store.cycleVersion, colorMode],
@@ -374,24 +396,29 @@ watch(
     const colorModeChanged = prevColorMode !== colorMode.value;
     prevColorMode = colorMode.value;
 
-    let shouldUpdate = false;
     if (colorModeChanged) {
-      shouldUpdate = true;
+      needsLayerUpdate = true;
     } else if (lastUpdate && lastUpdate.events.newFailures.length > 0) {
-      shouldUpdate = true;
+      needsLayerUpdate = true;
     } else if (lastUpdate?.updateVisuals) {
-      shouldUpdate = true;
+      needsLayerUpdate = true;
     }
 
-    const shouldUpdatePaths = lastUpdate && (lastUpdate.events.newRequests.length > 0 || lastUpdate.events.reroutes.length > 0);
-    if (!shouldUpdate && !shouldUpdatePaths) return;
+    if (lastUpdate && (lastUpdate.events.reroutes.length > 0 || lastUpdate.events.completed.length > 0 || lastUpdate.events.failed.length > 0)) {
+      needsRerouteUpdate = true;
+    }
+    // Also trigger reroute update when display paths change (e.g., expiry pruning)
+    if (store.rerouteDisplayPaths.size > 0) {
+      needsRerouteUpdate = true;
+    }
+    if (!needsLayerUpdate && !needsRerouteUpdate) return;
 
     if (updatePending) return;
     updatePending = true;
     requestAnimationFrame(() => {
       updatePending = false;
-      if (shouldUpdate) updateLayerMeshes();
-      if (shouldUpdatePaths) updatePaths();
+      if (needsLayerUpdate) { updateLayerMeshes(); needsLayerUpdate = false; }
+      if (needsRerouteUpdate) { updateReroutePaths(); needsRerouteUpdate = false; }
     });
   }
 );
@@ -433,7 +460,7 @@ watch(
       <template v-if="colorMode === 'traffic'">
         <div class="flex items-center gap-2"><span>Low</span><div class="w-16 h-2 rounded" style="background:linear-gradient(to right, #440154, #31688e, #35b779, #fde725)" /><span>High</span></div>
       </template>
-      <div class="flex items-center gap-2"><div class="w-4 h-0.5" style="background:#ff6600" /><span>Request Path</span></div>
+      <div class="flex items-center gap-2"><div class="w-4 h-0.5" style="background:#ff6600" /><span>Reroute Path</span></div>
     </div>
   </div>
 </template>

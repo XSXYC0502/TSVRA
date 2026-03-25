@@ -1,136 +1,136 @@
-# TSVRA - TSV路由算法仿真器
+# TSVRA - TSV Routing Algorithm Simulator
 
-## 项目简介
+## Overview
 
-TSVRA (TSV Routing Algorithm) 是一个3D芯片TSV（Through-Silicon Via）路由模拟系统。该系统模拟了多层芯片结构中的TSV传输、失效处理和冗余路由机制。
+TSVRA (TSV Routing Algorithm) is a 3D chip TSV (Through-Silicon Via) routing simulation system. It models TSV transmission, failure handling, and redundant routing mechanisms in a multi-layer chip structure.
 
-## 主要特性
+## Key Features
 
-- **多层TSV网格模型**：支持可配置的多层TSV网格（默认2层）
-- **冗余TSV机制**：每个4×4区域的四个顶角为冗余TSV
-- **三种失效模式**：
-  - 模式a：仅初始化时失效
-  - 模式b：仅运行时动态失效
-  - 模式c：混合失效（初始化 + 运行时）
-- **A*路由算法**：支持可扩展的启发函数接口
-- **热点区域模拟**：基于权重的请求生成，模拟真实的访问模式
-- **详细统计输出**：命令行统计 + CSV导出
+- **Multi-layer TSV grid model**: Supports configurable multi-layer TSV grids (default: 2 layers)
+- **Redundant TSV mechanism**: The four corners of each 4x4 region are treated as redundant TSVs
+- **Three failure modes**:
+  - Mode a: initial failures only
+  - Mode b: runtime dynamic failures only
+  - Mode c: mixed failures (initial + runtime)
+- **A* routing algorithm**: Supports an extensible heuristic interface
+- **Hotspot simulation**: Weighted request generation to model realistic access patterns
+- **Detailed statistics output**: Command-line summaries plus CSV export
 
-## 系统要求
+## Requirements
 
-- C++20兼容编译器（GCC 10+, Clang 11+）
+- C++20-compatible compiler (GCC 10+, Clang 11+)
 - CMake 3.20+
 
-## 编译
+## Build
 
 ```bash
-# 创建构建目录
+# Create the build directory
 mkdir build
 cd build
 
-# 配置CMake
+# Configure CMake
 cmake ..
 
-# 编译
+# Build
 make
 
-# 可执行文件将生成在 bin/ 目录下
+# Executables will be generated under bin/
 ```
 
-## 使用方法
+## Usage
 
-### 基本用法
+### Basic Usage
 
 ```bash
 ./bin/tsvra
 ```
 
-### 使用配置文件
+### Using a Config File
 
 ```bash
 ./bin/tsvra --config config.ini
 ```
 
-### 命令行参数
+### Command-Line Arguments
 
 ```bash
-./bin/tsvra [选项]
+./bin/tsvra [options]
 
-选项:
-  --config <file>           从文件加载配置
-  --layers <n>              层数 (默认: 2)
-  --grid-factor <n>         网格因子 (默认: 4, 网格大小 = 4*n)
-  --failure-mode <a|b|c>    失效模式 (默认: a)
-  --failure-rate <rate>     失效率 (默认: 1e-6)
-  --vertical-delay <n>      垂直延迟 (默认: 1)
-  --horizontal-delay <n>    水平延迟 (默认: 1000)
-  --output <prefix>         输出文件前缀 (默认: tsvra_output)
-  --seed <n>                随机数种子 (默认: 0=随机)
-  -h, --help                显示帮助信息
+Options:
+  --config <file>           Load configuration from a file
+  --layers <n>              Number of layers (default: 2)
+  --grid-factor <n>         Grid factor (default: 4, grid size = 4*n)
+  --failure-mode <a|b|c>    Failure mode (default: a)
+  --failure-rate <rate>     Failure rate (default: 1e-6)
+  --vertical-delay <n>      Vertical delay (default: 1)
+  --horizontal-delay <n>    Horizontal delay (default: 1000)
+  --output <prefix>         Output file prefix (default: tsvra_output)
+  --seed <n>                Random seed (default: 0 = random)
+  -h, --help                Show help
 ```
 
-### 示例
+### Examples
 
 ```bash
-# 使用16x16网格（grid-factor=4）
+# Use a 16x16 grid (grid-factor=4)
 ./bin/tsvra --grid-factor 4
 
-# 运行时失效模式
+# Runtime failure mode
 ./bin/tsvra --failure-mode b --failure-rate 1e-5
 
-# 自定义输出文件
+# Custom output prefix
 ./bin/tsvra --output experiment1
 
-# 使用固定随机种子（可重现结果）
+# Fixed random seed for reproducible results
 ./bin/tsvra --seed 12345
 ```
 
-## 配置参数说明
+## Configuration Parameters
 
-| 参数 | 说明 | 默认值 |
+| Parameter | Description | Default |
 |------|------|--------|
-| `num_layers` | 芯片层数 | 2 |
-| `grid_factor` | 网格因子（网格大小 = 4 × grid_factor） | 4 (16×16) |
-| `failure_mode` | 失效模式（a/b/c） | a |
-| `failure_rate` | TSV失效概率 | 1e-6 |
-| `vertical_delay` | 垂直传输延迟 | 1 |
-| `horizontal_delay` | 水平传输延迟 | 1000 |
-| `simulation_cycles` | 仿真周期数 | 100000 |
-| `output_prefix` | 输出文件前缀 | tsvra_output |
-| `random_seed` | 随机数种子（0=随机） | 0 |
+| `num_layers` | Number of chip layers | 2 |
+| `grid_factor` | Grid factor (grid size = 4 × grid_factor) | 4 (16x16) |
+| `failure_mode` | Failure mode (a/b/c) | a |
+| `failure_rate` | TSV failure probability | 1e-6 |
+| `vertical_delay` | Vertical transmission delay | 1 |
+| `horizontal_delay` | Horizontal transmission delay | 1000 |
+| `simulation_cycles` | Number of simulation cycles | 100000 |
+| `output_prefix` | Output file prefix | tsvra_output |
+| `random_seed` | Random seed (0 = random) | 0 |
 
-## 输出文件
+## Output Files
 
-运行后会生成两个CSV文件：
+The simulator generates two CSV files:
 
-1. **`{prefix}_summary.csv`**：统计摘要
-   - 总请求数、完成数、失败数
-   - 成功率
-   - 平均/最大/最小延迟
-   - TSV失效统计
+1. **`{prefix}_summary.csv`**: Summary statistics
+   - Total, completed, and failed request counts
+   - Success rate
+   - Average, maximum, and minimum latency
+   - TSV failure statistics
 
-2. **`{prefix}_requests.csv`**：详细请求记录
-   - 每个请求的起点、终点坐标
-   - 生成时间、完成时间、延迟
-   - 状态（完成/失败）
+2. **`{prefix}_requests.csv`**: Detailed request records
+   - Start and destination coordinates for each request
+   - Generation time, completion time, and latency
+   - Final status (completed/failed)
 
-## 项目结构
+## Project Structure
 
 ```
 TSVRA/
-├── CMakeLists.txt          # CMake构建配置
-├── README.md               # 本文件
-├── config.ini              # 配置文件示例
-├── include/                # 头文件目录
-│   ├── config.hpp          # 配置管理
-│   ├── tsv.hpp             # TSV单元
-│   ├── grid.hpp            # TSV网格
-│   ├── router.hpp          # A*路由算法
-│   ├── request.hpp         # 请求定义
-│   ├── request_generator.hpp # 请求生成器
-│   ├── simulator.hpp       # 仿真引擎
-│   └── statistics.hpp      # 统计输出
-└── src/                    # 源文件目录
+├── CMakeLists.txt          # CMake build configuration
+├── README.md               # This file
+├── config.ini              # Example configuration file
+├── include/                # Header files
+│   ├── config.hpp          # Configuration management
+│   ├── tsv.hpp             # TSV unit
+│   ├── grid.hpp            # TSV grid
+│   ├── router.hpp          # A* routing algorithm
+│   ├── request.hpp         # Request definition
+│   ├── request_generator.hpp # Request generator
+│   ├── simulator.hpp       # Simulation engine
+│   └── statistics.hpp      # Statistics output
+└── src/                    # Source files
     ├── config.cpp
     ├── tsv.cpp
     ├── grid.cpp
@@ -138,77 +138,76 @@ TSVRA/
     ├── request_generator.cpp
     ├── simulator.cpp
     ├── statistics.cpp
-    └── main.cpp            # 主程序入口
+    └── main.cpp            # Program entry point
 ```
 
-## 核心算法
+## Core Algorithms
 
-### TSV网格布局
+### TSV Grid Layout
 
-- 网格大小：N × N × L（N = 4 × grid_factor，L = num_layers）
-- 冗余TSV位置：每个4×4区域的四个顶角
-- 坐标系统：(x, y, z)，其中z表示层
+- Grid size: N × N × L (N = 4 × grid_factor, L = num_layers)
+- Redundant TSV positions: the four corners of each 4x4 region
+- Coordinate system: (x, y, z), where z is the layer index
 
-### A*路由算法
+### A* Routing
 
-- **启发函数**：曼哈顿距离（可扩展）
-- **移动规则**：
-  - 水平移动（同层）：延迟 = horizontal_delay
-  - 垂直移动（层间TSV）：延迟 = vertical_delay
-- **路由策略**：
-  - 避开失效TSV
-  - 考虑TSV占用时间
-  - 优先选择最短路径
+- **Heuristic**: Manhattan distance (extensible)
+- **Movement rules**:
+  - Horizontal movement (same layer): delay = horizontal_delay
+  - Vertical movement (inter-layer TSV): delay = vertical_delay
+- **Routing strategy**:
+  - Avoid failed TSVs
+  - Consider TSV occupancy time
+  - Prefer the shortest available path
 
-### 失效模型
+### Failure Model
 
-- **模式a（初始失效）**：仿真开始时随机失效部分TSV
-- **模式b（运行时失效）**：仿真过程中动态产生失效
-- **模式c（混合失效）**：结合a和b
+- **Mode a (initial failures)**: Random TSV failures at simulation startup
+- **Mode b (runtime failures)**: Dynamic failures introduced during simulation
+- **Mode c (mixed failures)**: Combination of a and b
 
-### 请求生成
+### Request Generation
 
-- **热点区域**：4×4 TSV块为基本单元，每个区域有随机热力值
-- **生成策略**：基于热力值的加权随机采样
-- **请求频率**：平均每100个周期生成1个请求（可调整）
+- **Hotspot regions**: 4x4 TSV blocks are the base unit, each with a random heat value
+- **Generation strategy**: Weighted random sampling based on heat values
+- **Request frequency**: Roughly one request every 100 cycles on average (adjustable)
 
-## 编译警告
+## Compiler Warnings
 
-项目使用严格的编译选项以确保代码质量：
+The project uses strict compiler options to keep code quality high:
 
-- `-Wall -Wextra -Wpedantic`：启用所有警告
-- `-Werror`：将警告视为错误
-- 其他详细警告选项（见CMakeLists.txt）
+- `-Wall -Wextra -Wpedantic`: enable standard warnings
+- `-Werror`: treat warnings as errors
+- Additional warning flags are listed in `CMakeLists.txt`
 
-## 扩展性
+## Extensibility
 
-### 自定义启发函数
+### Custom Heuristics
 
 ```cpp
-// 在Router中设置自定义启发函数
+// Set a custom heuristic in Router
 router.set_heuristic([](const Point& a, const Point& b) {
-    // 自定义距离计算
+    // Custom distance calculation
     return custom_distance(a, b);
 });
 ```
 
-### 调整请求生成率
+### Adjusting the Request Generation Rate
 
-修改`request_generator.cpp`中的`request_probability`：
+Modify `request_probability` in `request_generator.cpp`:
 
 ```cpp
-double request_probability = 0.01; // 1%概率/周期
+double request_probability = 0.01; // 1% probability per cycle
 ```
 
-## 许可证
+## License
 
-[添加您的许可证信息]
+[Add your license information here]
 
-## 作者
+## Authors
 
-[添加作者信息]
+[Add author information here]
 
-## 致谢
+## Acknowledgments
 
-本项目用于3D芯片TSV路由算法的研究和性能评估。
-
+This project is used for research and performance evaluation of 3D-chip TSV routing algorithms.

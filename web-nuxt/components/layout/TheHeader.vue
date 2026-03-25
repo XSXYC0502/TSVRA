@@ -15,7 +15,7 @@ const { wsConnected, simStatus, currentCycle, totalCycles } = storeToRefs(store)
         class="text-gray-400"
       >
         Cycle {{ currentCycle.toLocaleString() }} / {{ totalCycles.toLocaleString() }}
-        ({{ ((currentCycle / totalCycles) * 100).toFixed(1) }}%)
+        ({{ Math.min((currentCycle / totalCycles) * 100, 100).toFixed(1) }}%)
       </span>
       <div class="flex items-center gap-2">
         <div :class="['w-2 h-2 rounded-full', wsConnected ? 'bg-green-500' : 'bg-red-500']" />

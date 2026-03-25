@@ -10,52 +10,52 @@
 
 namespace tsvra {
 
-// 启发函数类型
+// Heuristic function type
 using HeuristicFunc = std::function<double(const Point&, const Point&)>;
 
-// A*路由器类
+// A* router class
 class Router {
 public:
     explicit Router(Grid& grid, const Config& config);
     
-    // 设置启发函数
+    // Set heuristic function
     void set_heuristic(HeuristicFunc heuristic) { heuristic_ = heuristic; }
     
-    // 为请求计算路由
-    // 返回路径和预计完成时间
+    // Compute route for a request
+    // Returns path and estimated completion time
     std::optional<std::pair<std::vector<Point>, uint64_t>> route(
         const Point& start, 
         const Point& end, 
         uint64_t current_time
     );
     
-    // 计算路径的传输时间
+    // Calculate transmission delay of a path
     uint64_t calculate_path_delay(const std::vector<Point>& path) const;
 
-    // 上次route()调用中实际使用旁路绕行的次数
+    // Number of bypass detours actually used in the last route() call
     uint32_t get_last_bypass_count() const { return last_bypass_count_; }
     
-    // 默认曼哈顿距离启发函数
+    // Default Manhattan distance heuristic function
     static double manhattan_distance(const Point& a, const Point& b);
     
 private:
     Grid& grid_;
     const Config& config_;
     HeuristicFunc heuristic_;
-    mutable uint32_t last_bypass_count_ = 0; // 上次route()调用中实际使用旁路的次数
+    mutable uint32_t last_bypass_count_ = 0; // Number of bypasses used in the last route() call
     
-    // A*节点
+    // A* node
     struct AStarNode {
         Point position;
-        double g_cost;      // 从起点到当前点的实际代价
-        double h_cost;      // 从当前点到终点的启发式代价
+        double g_cost;      // Actual cost from start to current point
+        double h_cost;      // Heuristic cost from current point to goal
         double f_cost;      // g_cost + h_cost
-        Point parent;       // 父节点位置
-        bool has_parent;    // 是否有父节点
-        Point redundant_via; // 如果使用了冗余TSV绕行，记录冗余TSV位置
-        bool used_redundant; // 是否使用了冗余TSV
-        uint32_t hop_count; // 从起点的跳数（用于L_max约束）
-        double risk_sum;    // 累计风险 ∑(-ln(1-pfail))（用于R_min约束）
+        Point parent;       // Parent node position
+        bool has_parent;    // Whether it has a parent node
+        Point redundant_via; // If redundant TSV bypass was used, stores the redundant TSV position
+        bool used_redundant; // Whether a redundant TSV was used
+        uint32_t hop_count; // Hop count from start (for L_max constraint)
+        double risk_sum;    // Cumulative risk sum(-ln(1-pfail)) (for R_min constraint)
 
         AStarNode()
             : position(), g_cost(0), h_cost(0), f_cost(0),
@@ -70,7 +70,7 @@ private:
               hop_count(hc), risk_sum(rs) {}
     };
     
-    // A*算法辅助函数
+    // A* algorithm helper functions
     std::vector<Point> get_neighbors(const Point& pos) const;
     double calculate_move_cost(const Point& from, const Point& to) const;
     std::vector<Point> reconstruct_path(
@@ -79,7 +79,7 @@ private:
         const Point& end
     ) const;
 
-    // 将压缩路径展开为单元相邻步（水平段逐格展开）
+    // Expand compressed path into unit-adjacent steps (horizontal segments expanded cell by cell)
     std::vector<Point> expand_path(const std::vector<Point>& compressed) const;
 };
 

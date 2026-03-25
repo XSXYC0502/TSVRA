@@ -234,7 +234,7 @@ function buildScene() {
   const lineGeom = new LineSegmentsGeometry();
   const lineMat = new LineMaterial({
     color: 0xffffff,
-    linewidth: 3,
+    linewidth: 1,
   });
   lineMat.resolution.set(el.clientWidth, el.clientHeight);
   gridFrame = new LineSegments2(lineGeom, lineMat);
@@ -282,20 +282,39 @@ function stopAnimation() {
   }
 }
 
+function getGridLinePositions(size: number, layout: string, gridFactor: number): number[] {
+  const positions: number[] = [];
+  if (layout === 'shared' && gridFactor > 1) {
+    const stride = gridFactor - 1;
+    for (let i = 0; 1 + stride * i < size; i++) positions.push(1 + stride * i);
+  }
+  return positions;
+}
+
 function updateGridFrame() {
   if (!gridFrame || !config.value) return;
   const size = config.value.gridSize;
   const layers = config.value.numLayers;
   const half = size / 2;
-  const numRegions = size / 4;
+  const layout = config.value.redundancy?.layout ?? 'shared';
+  const gf = config.value.gridFactor ?? 4;
+  const linePositions = getGridLinePositions(size, layout, gf);
   const pts: number[] = [];
 
   for (let layer = 0; layer < layers; layer++) {
     const y = layer * layerSpacing;
-    for (let i = 0; i <= numRegions; i++) {
-      const pos = i * 4 - half;
-      pts.push(-half, y, pos, half, y, pos);
-      pts.push(pos, y, -half, pos, y, half);
+
+    // Outer boundary
+    pts.push(-half, y, -half, half, y, -half);
+    pts.push(-half, y, half, half, y, half);
+    pts.push(-half, y, -half, -half, y, half);
+    pts.push(half, y, -half, half, y, half);
+
+    // Internal lines at redundant TSV positions
+    for (const pos of linePositions) {
+      const worldPos = pos - half + 0.5;
+      pts.push(-half, y, worldPos, half, y, worldPos);
+      pts.push(worldPos, y, -half, worldPos, y, half);
     }
   }
 

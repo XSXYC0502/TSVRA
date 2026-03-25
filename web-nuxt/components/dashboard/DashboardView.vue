@@ -25,8 +25,8 @@ const {
   throughputTimeline, summary, simStatus, currentCycle, totalCycles
 } = storeToRefs(store);
 
-const total = computed(() => completedCount.value + failedCount.value);
-const successRate = computed(() => total.value > 0 ? (completedCount.value / total.value) * 100 : 0);
+const resolved = computed(() => completedCount.value + failedCount.value);
+const successRate = computed(() => resolved.value > 0 ? (completedCount.value / resolved.value) * 100 : 0);
 const avgLatency = computed(() => stats.value?.avgLatency ?? summary.value?.avgLatency ?? 0);
 const failedTSVs = computed(() => stats.value?.failedTSVs ?? 0);
 
@@ -170,15 +170,15 @@ const pieChartOptions = {
         {{ simStatus === 'done' ? 'Simulation Complete' : 'Simulation Dashboard' }}
       </h2>
       <span v-if="totalCycles > 0" class="text-sm text-gray-400">
-        Progress: {{ ((currentCycle / totalCycles) * 100).toFixed(1) }}%
+        Progress: {{ Math.min((currentCycle / totalCycles) * 100, 100).toFixed(1) }}%
       </span>
     </div>
 
     <!-- KPI Cards -->
     <div class="grid grid-cols-4 gap-4">
       <div class="bg-gray-800/50 rounded-lg p-4 border border-gray-700/50">
-        <p class="text-xs text-gray-400 mb-1">Total Requests</p>
-        <p class="text-2xl font-bold text-blue-400">{{ formatNumber(total) }}</p>
+        <p class="text-xs text-gray-400 mb-1">Resolved Requests</p>
+        <p class="text-2xl font-bold text-blue-400">{{ formatNumber(resolved) }}</p>
         <p v-if="stats" class="text-xs text-gray-500 mt-1">{{ stats.pending }} pending, {{ stats.transmitting }} transmitting</p>
       </div>
       <div class="bg-gray-800/50 rounded-lg p-4 border border-gray-700/50">

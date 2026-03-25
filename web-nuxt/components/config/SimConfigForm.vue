@@ -17,11 +17,12 @@ const config = reactive({
   horizontalDelay: 1000,
   cycles: 10000,
   seed: 0,
+  redundancy: 'shared' as 'shared' | 'none',
 });
 
 const fields = [
   { key: 'numLayers', label: 'Layers', type: 'number', min: 2, max: 10 },
-  { key: 'gridFactor', label: 'Grid Factor', type: 'number', min: 1, max: 16 },
+  { key: 'gridFactor', label: 'Grid Factor', type: 'number', min: 3, max: 16 },
   { key: 'failureRate', label: 'Failure Rate', type: 'number', step: 0.0001 },
   { key: 'verticalDelay', label: 'Vertical Delay', type: 'number', min: 1 },
   { key: 'horizontalDelay', label: 'Horizontal Delay', type: 'number', min: 1 },
@@ -34,10 +35,10 @@ function handleStart() {
 }
 
 watch(
-  () => [config.numLayers, config.gridFactor],
-  ([numLayers, gridFactor]) => {
+  () => [config.numLayers, config.gridFactor, config.redundancy],
+  ([numLayers, gridFactor, redundancy]) => {
     if (store.simStatus === 'idle') {
-      store.initializePreview(gridFactor, numLayers);
+      store.initializePreview(gridFactor as number, numLayers as number, redundancy as 'shared' | 'none');
     }
   }
 );
@@ -70,6 +71,18 @@ watch(
         <option value="a">Initial Only</option>
         <option value="b">Runtime Only</option>
         <option value="c">Combined</option>
+      </select>
+    </div>
+
+    <!-- Redundancy layout -->
+    <div>
+      <label class="text-xs text-gray-400 block mb-0.5">Redundancy Layout</label>
+      <select
+        v-model="config.redundancy"
+        class="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm focus:border-blue-500 focus:outline-none"
+      >
+        <option value="shared">Shared Spare</option>
+        <option value="none">None</option>
       </select>
     </div>
 

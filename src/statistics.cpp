@@ -79,35 +79,35 @@ double Statistics::get_average_latency() const {
 
 void Statistics::print_summary() const {
     std::cout << "\n=================================\n";
-    std::cout << "       仿真统计结果\n";
+    std::cout << "    Simulation Statistics\n";
     std::cout << "=================================\n\n";
     
-    // 请求统计
-    std::cout << "请求统计:\n";
-    std::cout << "  总请求数:     " << total_requests_ << "\n";
-    std::cout << "  完成请求数:   " << completed_requests_ << "\n";
-    std::cout << "  失败请求数:   " << failed_requests_ << "\n";
+    // Request statistics
+    std::cout << "Request Statistics:\n";
+    std::cout << "  Total requests:     " << total_requests_ << "\n";
+    std::cout << "  Completed requests: " << completed_requests_ << "\n";
+    std::cout << "  Failed requests:    " << failed_requests_ << "\n";
     
     if (total_requests_ > 0) {
         double success_rate = static_cast<double>(completed_requests_) * 100.0 / static_cast<double>(total_requests_);
-        std::cout << "  成功率:       " << std::fixed << std::setprecision(2) << success_rate << "%\n";
+        std::cout << "  Success rate:       " << std::fixed << std::setprecision(2) << success_rate << "%\n";
     }
     
-    // 延迟统计
-    std::cout << "\n延迟统计:\n";
+    // Latency statistics
+    std::cout << "\nLatency Statistics:\n";
     if (completed_requests_ > 0) {
-        std::cout << "  平均延迟:     " << std::fixed << std::setprecision(2) << get_average_latency() << " 周期\n";
-        std::cout << "  最大延迟:     " << max_latency_ << " 周期\n";
-        std::cout << "  最小延迟:     " << min_latency_ << " 周期\n";
+        std::cout << "  Average latency:    " << std::fixed << std::setprecision(2) << get_average_latency() << " cycles\n";
+        std::cout << "  Max latency:        " << max_latency_ << " cycles\n";
+        std::cout << "  Min latency:        " << min_latency_ << " cycles\n";
     } else {
-        std::cout << "  无完成请求\n";
+        std::cout << "  No completed requests\n";
     }
     
-    // TSV统计
-    std::cout << "\nTSV统计:\n";
-    std::cout << "  失效TSV数:         " << current_failed_tsvs_ << "\n";
-    std::cout << "  失效冗余TSV数:     " << current_failed_redundant_tsvs_ << "\n";
-    std::cout << "  冗余TSV使用次数:   " << redundant_tsv_usages_ << "\n";
+    // TSV statistics
+    std::cout << "\nTSV Statistics:\n";
+    std::cout << "  Failed TSVs:            " << current_failed_tsvs_ << "\n";
+    std::cout << "  Failed redundant TSVs:  " << current_failed_redundant_tsvs_ << "\n";
+    std::cout << "  Redundant TSV usages:   " << redundant_tsv_usages_ << "\n";
     
     std::cout << "\n=================================\n\n";
 }
@@ -115,10 +115,10 @@ void Statistics::print_summary() const {
 void Statistics::export_to_csv(const std::string& filename) const {
     std::ofstream file(filename);
     if (!file.is_open()) {
-        std::cerr << "无法创建文件: " << filename << std::endl;
+        std::cerr << "Failed to create file: " << filename << std::endl;
         return;
     }
-    
+
     file << "Metric,Value\n";
     file << "Total Requests," << total_requests_ << "\n";
     file << "Completed Requests," << completed_requests_ << "\n";
@@ -143,33 +143,33 @@ void Statistics::export_to_csv(const std::string& filename) const {
     file << "Spare Unavailable," << spare_unavailable_ << "\n";
     file << "In Flight At Horizon," << in_flight_ << "\n";
 
-    // 计算终端投递率（排除在途请求）
+    // Calculate terminal delivery rate (excluding in-flight requests)
     uint64_t terminal_total = completed_requests_ + failed_requests_;
     if (terminal_total > 0) {
         double terminal_rate = static_cast<double>(completed_requests_) * 100.0 / static_cast<double>(terminal_total);
         file << "Terminal Delivery Rate (%)," << terminal_rate << "\n";
     }
-    // 路由失败率
+    // Route failure rate
     if (total_requests_ > 0) {
         double route_fail_rate = static_cast<double>(failed_requests_) * 100.0 / static_cast<double>(total_requests_);
         file << "Route Failure Rate (%)," << route_fail_rate << "\n";
     }
     
     file.close();
-    std::cout << "统计数据已导出到: " << filename << std::endl;
+    std::cout << "Statistics exported to: " << filename << std::endl;
 }
 
 void Statistics::export_requests_to_csv(const std::string& filename) const {
     std::ofstream file(filename);
     if (!file.is_open()) {
-        std::cerr << "无法创建文件: " << filename << std::endl;
+        std::cerr << "Failed to create file: " << filename << std::endl;
         return;
     }
-    
+
     file << "Request ID,Start X,Start Y,Start Z,End X,End Y,End Z,"
          << "Generate Time,Complete Time,Latency,Status\n";
-    
-    // 导出完成的请求
+
+    // Export completed requests
     for (const auto& req : completed_requests_list_) {
         file << req.id << ","
              << req.start.x << "," << req.start.y << "," << req.start.z << ","
@@ -178,7 +178,7 @@ void Statistics::export_requests_to_csv(const std::string& filename) const {
              << req.get_latency() << ",Completed\n";
     }
     
-    // 导出失败的请求
+    // Export failed requests
     for (const auto& req : failed_requests_list_) {
         file << req.id << ","
              << req.start.x << "," << req.start.y << "," << req.start.z << ","
@@ -187,7 +187,7 @@ void Statistics::export_requests_to_csv(const std::string& filename) const {
     }
     
     file.close();
-    std::cout << "请求数据已导出到: " << filename << std::endl;
+    std::cout << "Request data exported to: " << filename << std::endl;
 }
 
 } // namespace tsvra

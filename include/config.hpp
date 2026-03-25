@@ -7,50 +7,50 @@
 
 namespace tsvra {
 
-// 冗余布局枚举
+// Redundancy layout enum
 enum class RedundancyLayout {
-    LEGACY_CORNER4,   // 旧版：每个4×4区域4个角冗余TSV，全局扫描
-    SHARED_SPARE,     // 文献正确：每个区域1个共享冗余TSV，覆盖范围搜索
-    NONE              // 无冗余（基准对比）
+    LEGACY_CORNER4,   // Legacy: 4 corner redundant TSVs per 4×4 region, global scan
+    SHARED_SPARE,     // Literature-correct: 1 shared spare TSV per region, coverage-range search
+    NONE              // No redundancy (baseline comparison)
 };
 
-// 失效分布模型枚举
+// Failure distribution model enum
 enum class FailureModel {
-    UNIFORM,          // 均匀i.i.d. Bernoulli（等价于cluster_strength=0）
-    CLUSTERED         // 空间聚集（带连续参数strength和radius）
+    UNIFORM,          // Uniform i.i.d. Bernoulli (equivalent to cluster_strength=0)
+    CLUSTERED         // Spatial clustering (with continuous parameters strength and radius)
 };
 
-// 聚集参数
+// Clustering parameters
 struct ClusterParams {
-    double strength = 0.8;    // [0.0, 1.0]：0=均匀，1=最大聚集
-    uint32_t radius = 4;      // ≥1：曼哈顿距离聚集核半径
+    double strength = 0.8;    // [0.0, 1.0]: 0=uniform, 1=maximum clustering
+    uint32_t radius = 4;      // ≥1: Manhattan distance clustering kernel radius
 };
 
-// 失效模式枚举
+// Failure mode enum
 enum class FailureMode {
-    INITIAL_ONLY,      // a: 仅初始化时失效
-    RUNTIME_ONLY,      // b: 仅运行时失效
-    COMBINED           // c: 初始化 + 运行时失效
+    INITIAL_ONLY,      // a: Failures only at initialization
+    RUNTIME_ONLY,      // b: Failures only at runtime
+    COMBINED           // c: Initialization + runtime failures
 };
 
-// 配置类
+// Configuration class
 class Config {
 public:
     Config();
 
-    // 从配置文件加载
+    // Load from configuration file
     bool load_from_file(const std::string& filename);
 
-    // 从命令行参数解析
+    // Parse from command-line arguments
     bool parse_command_line(int argc, char* argv[]);
 
-    // 验证配置
+    // Validate configuration
     bool validate() const;
 
-    // 输出配置信息
+    // Print configuration info
     void print() const;
 
-    // 输出JSON格式配置（用于--print-defaults和init消息）
+    // Output configuration in JSON format (used for --print-defaults and init message)
     std::string to_json() const;
 
     // Getters
@@ -94,26 +94,26 @@ public:
     void set_cluster_params(const ClusterParams& v) { cluster_params_ = v; }
 
 private:
-    uint32_t num_layers_;           // 层数，默认4（文献最优）
-    uint32_t grid_factor_;          // N = 4 * grid_factor，默认4
-    FailureMode failure_mode_;      // 失效模式
-    double failure_rate_;           // TSV失效率，默认1e-5（文献校准）
-    uint64_t vertical_delay_;       // 垂直传输延迟，默认5（文献校准）
-    uint64_t horizontal_delay_;     // 水平传输延迟，默认500（文献校准）
-    uint64_t simulation_cycles_;    // 仿真周期数，默认100000（文献最低要求）
-    std::string output_prefix_;     // 输出文件前缀，默认"tsvra_output"
-    uint32_t random_seed_;          // 随机数种子，0表示使用随机设备
-    double lambda1_;                // 拥塞权重（λ1），默认0.0
-    double lambda2_;                // 风险权重（λ2），默认0.0
-    uint32_t max_path_length_;      // 最大路径长度（L_max），0表示不限制
-    double reliability_min_;        // 最小路径可靠性（R_min），0.0表示不约束
-    bool json_stream_;              // JSON流式输出模式
-    RedundancyLayout redundancy_layout_; // 冗余布局策略
-    FailureModel failure_model_;    // 失效分布模型
-    ClusterParams cluster_params_;  // 聚集参数
-    bool print_defaults_;           // --print-defaults标志
+    uint32_t num_layers_;           // Number of layers, default 4 (literature optimal)
+    uint32_t grid_factor_;          // N = 4 * grid_factor, default 4
+    FailureMode failure_mode_;      // Failure mode
+    double failure_rate_;           // TSV failure rate, default 1e-5 (literature calibrated)
+    uint64_t vertical_delay_;       // Vertical transmission delay, default 5 (literature calibrated)
+    uint64_t horizontal_delay_;     // Horizontal transmission delay, default 500 (literature calibrated)
+    uint64_t simulation_cycles_;    // Number of simulation cycles, default 100000 (literature minimum requirement)
+    std::string output_prefix_;     // Output file prefix, default "tsvra_output"
+    uint32_t random_seed_;          // Random seed, 0 means use random device
+    double lambda1_;                // Congestion weight (λ1), default 0.0
+    double lambda2_;                // Risk weight (λ2), default 0.0
+    uint32_t max_path_length_;      // Maximum path length (L_max), 0 means unlimited
+    double reliability_min_;        // Minimum path reliability (R_min), 0.0 means unconstrained
+    bool json_stream_;              // JSON streaming output mode
+    RedundancyLayout redundancy_layout_; // Redundancy layout strategy
+    FailureModel failure_model_;    // Failure distribution model
+    ClusterParams cluster_params_;  // Clustering parameters
+    bool print_defaults_;           // --print-defaults flag
 
-    // 辅助函数
+    // Helper functions
     FailureMode parse_failure_mode(const std::string& mode_str) const;
     std::string failure_mode_to_string(FailureMode mode) const;
     RedundancyLayout parse_redundancy_layout(const std::string& str) const;

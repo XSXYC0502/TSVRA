@@ -46,37 +46,37 @@ struct JsonReroute {
     Point redundant_used;
 };
 
-// 仿真器类
+// Simulator class
 class Simulator {
 public:
     explicit Simulator(const Config& config);
 
-    // 初始化仿真环境
+    // Initialize simulation environment
     void initialize();
 
-    // 运行仿真
+    // Run simulation
     void run();
 
-    // 获取统计信息
+    // Get statistics
     const Statistics& get_statistics() const { return stats_; }
 
 private:
     const Config& config_;
     std::mt19937 rng_;
 
-    // 核心组件
+    // Core components
     std::unique_ptr<Grid> grid_;
     std::unique_ptr<Router> router_;
     std::unique_ptr<RequestGenerator> req_gen_;
     Statistics stats_;
 
-    // 待处理请求队列
+    // Pending request queue
     std::queue<Request> pending_requests_;
 
-    // 传输中请求列表
+    // In-transit request list
     std::vector<Request> transmitting_requests_;
 
-    // 当前时钟周期
+    // Current clock cycle
     uint64_t current_cycle_;
 
     // JSON streaming mode
@@ -92,7 +92,7 @@ private:
     std::vector<JsonNewFailure> cycle_new_failures_;
     std::vector<JsonReroute> cycle_reroutes_;
 
-    // 仿真步骤
+    // Simulation steps
     void simulate_cycle();
     void generate_new_requests();
     void handle_runtime_failures();
@@ -104,7 +104,7 @@ private:
     void increment_path_usage(const std::vector<Point>& path);
     void decrement_path_usage(const std::vector<Point>& path);
 
-    // 辅助函数
+    // Helper functions
     void print_progress() const;
 
     // JSON streaming helpers
