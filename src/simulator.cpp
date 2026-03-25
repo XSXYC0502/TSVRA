@@ -3,12 +3,39 @@
 #include <iomanip>
 #include <sstream>
 #include <algorithm>
+#include <chrono>
 #include <limits>
+#include <mutex>
+#include <thread>
 
-#ifdef __linux__
-#include <poll.h>
-#include <unistd.h>
-#endif
+namespace {
+
+struct StdinCommandBuffer {
+    std::mutex mutex;
+    std::queue<char> commands;
+    std::once_flag reader_started;
+};
+
+StdinCommandBuffer& get_stdin_command_buffer() {
+    static auto* buffer = new StdinCommandBuffer();
+    return *buffer;
+}
+
+void start_stdin_command_reader() {
+    auto& buffer = get_stdin_command_buffer();
+    std::call_once(buffer.reader_started, []() {
+        std::thread([]() {
+            char ch = '\0';
+            while (std::cin.get(ch)) {
+                auto& shared = get_stdin_command_buffer();
+                std::lock_guard<std::mutex> lock(shared.mutex);
+                shared.commands.push(ch);
+            }
+        }).detach();
+    });
+}
+
+} // namespace
 
 namespace tsvra {
 
@@ -21,6 +48,9 @@ Simulator::Simulator(const Config& config)
       paused_(false),
       steps_remaining_(0),
       stop_requested_(false) {
+    if (json_stream_mode_) {
+        start_stdin_command_reader();
+    }
 }
 
 // ========== JSON helper methods ==========
@@ -66,16 +96,18 @@ void Simulator::reset_cycle_accumulators() {
 }
 
 void Simulator::poll_stdin_commands() {
-#ifdef __linux__
-    struct pollfd pfd;
-    pfd.fd = STDIN_FILENO;
-    pfd.events = POLLIN;
-    pfd.revents = 0;
+    start_stdin_command_reader();
 
-    while (poll(&pfd, 1, 0) > 0 && (pfd.revents & POLLIN)) {
-        char ch;
-        ssize_t n = read(STDIN_FILENO, &ch, 1);
-        if (n <= 0) break;
+    std::queue<char> pending_commands;
+    {
+        auto& buffer = get_stdin_command_buffer();
+        std::lock_guard<std::mutex> lock(buffer.mutex);
+        std::swap(pending_commands, buffer.commands);
+    }
+
+    while (!pending_commands.empty()) {
+        const char ch = pending_commands.front();
+        pending_commands.pop();
         if (ch == '\n' || ch == '\r') continue;
 
         switch (ch) {
@@ -99,7 +131,6 @@ void Simulator::poll_stdin_commands() {
                 break;
         }
     }
-#endif
 }
 
 // ========== JSON emission methods ==========
@@ -400,6 +431,12 @@ void Simulator::run() {
         std::cerr << "Starting simulation (JSON stream mode)...\n";
         std::cerr << "Simulation cycles: " << config_.get_simulation_cycles() << "\n\n";
 
+        // Give the controller a brief window to deliver startup commands such as the
+        // immediate pause used by the web UI lockstep mode.
+        poll_stdin_commands();
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        poll_stdin_commands();
+
         uint64_t total_cycles = config_.get_simulation_cycles();
 
         for (current_cycle_ = 0; current_cycle_ < total_cycles; ++current_cycle_) {
@@ -409,10 +446,7 @@ void Simulator::run() {
             // Handle pause
             while (paused_ && !stop_requested_) {
                 poll_stdin_commands();
-                // Sleep briefly to avoid busy loop (1ms)
-#ifdef __linux__
-                usleep(1000);
-#endif
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
             }
 
             if (stop_requested_) {
@@ -803,8 +837,7 @@ void Simulator::update_transmitting_requests() {
             // Calculate time to reach next hop
             if (req.current_hop > 0) {
                 Point prev_pos = req.path[req.current_hop - 1];
-                uint64_t hop_delay = static_cast<uint64_t>(
-                    router_->calculate_path_delay({prev_pos, next_pos}));
+                uint64_t hop_delay = router_->calculate_path_delay({prev_pos, next_pos});
 
                 // B4: Wait for TSV to be free before starting transmission
                 uint64_t start_time = current_cycle_;

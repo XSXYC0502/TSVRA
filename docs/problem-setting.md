@@ -281,7 +281,7 @@ The simulation collects and exports:
 | Parameter | Legacy Value | Calibrated Value | Source |
 |-----------|-------------|-----------------|--------|
 | `num_layers` | 2 | 4 | IEICE 2012 |
-| `failure_rate` | 1e-6 | 1e-5 | 电子测量技术 2025 |
+| `failure_rate` | 1e-6 | 1e-5 | Electronic Measurement Technology 2025 |
 | `vertical_delay` | 1 | 5 | IEICE 2015 |
 | `horizontal_delay` | 1000 | 500 | IEICE 2015 |
 | `simulation_cycles` | 10,000 | 100,000 | Statistical significance |

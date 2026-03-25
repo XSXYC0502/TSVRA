@@ -7,16 +7,50 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-function resolveBinPath(): string {
-  const candidates = [
-    path.resolve(__dirname, '../../../bin/tsvra'),   // from server/utils/ → project root
-    path.resolve(process.cwd(), '../bin/tsvra'),      // if cwd is web-nuxt/
-    path.resolve(process.cwd(), 'bin/tsvra'),         // if cwd is visual-web/
+const WINDOWS_CONFIG_DIRS = ['Debug', 'Release', 'RelWithDebInfo', 'MinSizeRel'];
+
+function getCandidateBinPaths(): string[] {
+  const executableNames = process.platform === 'win32'
+    ? ['tsvra.exe', 'tsvra']
+    : ['tsvra', 'tsvra.exe'];
+
+  const candidateDirs = [
+    path.resolve(__dirname, '../../../bin'),
+    path.resolve(process.cwd(), '../bin'),
+    path.resolve(process.cwd(), 'bin'),
+    path.resolve(__dirname, '../../../build'),
+    path.resolve(process.cwd(), '../build'),
+    path.resolve(process.cwd(), 'build'),
+    ...WINDOWS_CONFIG_DIRS.flatMap((config) => [
+      path.resolve(__dirname, `../../../bin/${config}`),
+      path.resolve(__dirname, `../../../build/${config}`),
+      path.resolve(process.cwd(), `../bin/${config}`),
+      path.resolve(process.cwd(), `../build/${config}`),
+      path.resolve(process.cwd(), `bin/${config}`),
+      path.resolve(process.cwd(), `build/${config}`),
+    ]),
   ];
-  for (const p of candidates) {
-    if (fs.existsSync(p)) return p;
+
+  const explicitBin = process.env.TSVRA_BIN?.trim();
+  const candidates = explicitBin ? [path.resolve(explicitBin)] : [];
+
+  for (const dir of candidateDirs) {
+    for (const executableName of executableNames) {
+      candidates.push(path.join(dir, executableName));
+    }
   }
-  throw new Error(`tsvra binary not found. Searched:\n${candidates.join('\n')}`);
+
+  return [...new Set(candidates)];
+}
+
+function resolveBinPath(): string {
+  const candidates = getCandidateBinPaths();
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) {
+      return candidate;
+    }
+  }
+  throw new Error(`tsvra binary not found. Set TSVRA_BIN or build the project first. Searched:\n${candidates.join('\n')}`);
 }
 
 export type SimConfig = {

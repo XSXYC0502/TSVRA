@@ -1,71 +1,71 @@
-## 3.2.3 冗余 TSV 布局的拓扑设计
+## 3.2.3 Topological Design of the Redundant TSV Layout
 
-冗余布局需权衡修复覆盖与面积/路径开销。团队以多目标代价函数
+The redundant layout must balance repair coverage against area and path overhead. The team used the following multi-objective cost function
 \[
 \min Cost=\alpha R+(1-\alpha)E_{norm}
 \]
-（\(R\) 为失效风险，\(E_{norm}\) 为归一化路径开销）为设计准则，对比了均匀分布式、区域分组式与蜂窝状三类方案，选定区域分组式（Shared Spare）作为默认实现。
+where \(R\) is failure risk and \(E_{norm}\) is normalized path overhead. Based on this criterion, the team compared uniform, region-grouped, and honeycomb-style layouts, and selected the region-grouped scheme (Shared Spare) as the default implementation.
 
-**Shared Spare 布局实现。** 将 \(N \times N\) 阵列按步长 3 滑动分块为重叠 4×4 子块，每块在固定坐标 \((1+3b_i,\;1+3b_j)\) 放置 1 个共享冗余 TSV。以默认 16×16 阵列为例，形成 5×5 个子块、每层 25 个冗余 TSV，冗余比约 9.77%。子块重叠使边界 TSV 在聚簇故障下可被多个冗余候选覆盖。路由时通过 `region_to_spares_` 映射表快速定位当前区域可用冗余 TSV。
+**Shared Spare layout implementation.** The \(N \times N\) array is partitioned into overlapping 4×4 sub-blocks using a sliding step of 3. Each block places one shared redundant TSV at the fixed coordinate \((1+3b_i,\;1+3b_j)\). In the default 16×16 array, this yields a 5×5 block grid with 25 redundant TSVs per layer, for a redundancy ratio of about 9.77%. The overlap allows boundary TSVs to be covered by multiple redundant candidates under clustered faults. During routing, the `region_to_spares_` mapping table is used to quickly locate redundant TSVs available to the current region.
 
-**对比方案。** 平台同时保留 Legacy Corner-4 布局（每 4×4 区域四角各放 1 个冗余 TSV）与无冗余基线，可通过配置参数 `redundancy_layout` 切换，在统一框架下对比修复率、延迟与资源利用率。
+**Comparison baselines.** The platform also preserves the Legacy Corner-4 layout, where each 4×4 region places one redundant TSV at each corner, along with a no-redundancy baseline. The `redundancy_layout` configuration parameter switches among them so repair rate, latency, and resource utilization can be compared within one framework.
 
-## 3.4 仿真平台 Demo 搭建与初步验证
+## 3.4 Simulation Platform Demo and Preliminary Validation
 
-团队完成了覆盖"参数配置→阵列建模→故障注入→路径搜索→统计导出→可视化"全流程的仿真平台 Demo，架构如下：
+The team completed a simulation-platform demo covering the full workflow from parameter configuration, array modeling, fault injection, and path search to statistics export and visualization. The architecture is shown below:
 
 ```
 Browser (Vue 3 SPA) ←WebSocket→ Nitro Server ←stdio JSON→ C++ Process (bin/tsvra)
 ```
 
-底层 C++ 仿真内核负责建模与计算，上层 Web 前端负责参数交互与实时可视化，两者通过 JSON 行协议经 stdio 通信。
+The lower-layer C++ simulation core handles modeling and computation, while the Web frontend handles parameter interaction and real-time visualization. The two communicate over stdio using a line-delimited JSON protocol.
 
-### 3.4.1 模拟器核心框架开发
+### 3.4.1 Core Simulator Framework Development
 
-**C++ 仿真内核**（C++20 / CMake）包含六个模块：
+**The C++ simulation core** (C++20 / CMake) contains six modules:
 
-| 模块 | 类 | 职责 |
+| Module | Class | Responsibility |
 |------|-----|------|
-| 配置管理 | `Config` | 解析层数、阵列规模、故障模式/率、时延参数、冗余布局等 |
-| 网格建模 | `Grid` | 初始化三维阵列 `grid_[z][y][x]`，维护冗余属性、失效与占用状态 |
-| 路由求解 | `Router` | A\* 三维路径搜索，支持失效旁路、拥塞/风险加权代价 |
-| 请求生成 | `RequestGenerator` | 基于热点权重的区域采样，每周期约 10% 概率生成请求 |
-| 仿真调度 | `Simulator` | 离散时钟驱动，协调各模块执行 |
-| 统计输出 | `Statistics` | 聚合延迟、成功率、故障数、冗余使用等指标 |
+| Configuration management | `Config` | Parses layer count, array size, fault mode/rate, delay parameters, redundancy layout, and related settings |
+| Grid modeling | `Grid` | Initializes the 3D array `grid_[z][y][x]` and maintains redundancy, failure, and occupancy state |
+| Routing solver | `Router` | Runs A\* pathfinding in 3D, with failed-node bypass and congestion/risk-aware weighted cost |
+| Request generation | `RequestGenerator` | Samples regions from hotspot weights and generates requests with about 10% probability per cycle |
+| Simulation scheduling | `Simulator` | Drives the discrete clock and coordinates module execution |
+| Statistics output | `Statistics` | Aggregates latency, success rate, fault counts, redundant usage, and related metrics |
 
-**周期调度流程。** 每个仿真周期依次执行四步：
-1. `generate_new_requests()` — 热点加权随机生成通信请求
-2. `update_transmitting_requests()` — 推进在途请求沿路径前进
-3. `handle_runtime_failures()` — 注入运行时故障并触发在途请求重路由
-4. `process_pending_requests()` — 对待处理请求执行 A\* 路由
+**Cycle scheduling flow.** Each simulation cycle executes four steps in sequence:
+1. `generate_new_requests()` — generate communication requests by hotspot-weighted random sampling
+2. `update_transmitting_requests()` — advance in-flight requests along their paths
+3. `handle_runtime_failures()` — inject runtime faults and trigger rerouting for in-flight requests
+4. `process_pending_requests()` — run A\* routing for pending requests
 
-**A\* 路由代价模型。** 单步代价为
+**A\* routing cost model.** The single-step cost is
 \[
 c = c_{\text{move}} + \lambda_1 \cdot \text{usage\_count} + \lambda_2 \cdot \varphi(p_{\text{fail}}),\quad \varphi(p) = -\ln(1-p)
 \]
-其中 \(c_{\text{move}}\) 为垂直延迟（默认 5）或水平延迟（默认 500），\(\lambda_1\)、\(\lambda_2\) 分别控制拥塞与风险敏感度。路由同时受最大跳数 \(L_{\max}\) 与最低可靠度 \(R_{\min}\) 约束。遇失效 TSV 时，算法自动搜索所属区域内可用冗余 TSV 进行旁路。
+where \(c_{\text{move}}\) is the vertical delay (default 5) or horizontal delay (default 500), and \(\lambda_1\) and \(\lambda_2\) control congestion and risk sensitivity respectively. Routing is also constrained by the maximum hop count \(L_{\max}\) and minimum reliability \(R_{\min}\). When a failed TSV is encountered, the algorithm automatically searches the corresponding region for an available redundant TSV to use as a bypass.
 
-**C++ ↔ Web 通信协议。** C++ 以 `--json-stream` 模式运行，通过 stdout 逐行输出 JSON：`init`（一次）→ `cycle`（每周期）→ `done`（结束）。服务端经 Nitro WebSocket 转发至浏览器。控制信号通过 stdin 单字符下发（`p`/`r`/`s`/`n`），C++ 以非阻塞 `poll()` 读取。
+**C++ ↔ Web communication protocol.** C++ runs in `--json-stream` mode and writes JSON line by line to stdout: `init` once, then `cycle` per cycle, and finally `done` at completion. The server forwards these messages to the browser through Nitro WebSocket. Control signals are sent as single characters over stdin (`p`/`r`/`s`/`n`), and C++ reads them with non-blocking `poll()`.
 
-**锁步速度控制。** C++ 启动后立即暂停。浏览器发送 `{ type: "ack", count: N }` 消息，服务端将其转换为 N 个 `n`（step）指令写入 C++ stdin。不同速度档位（step / slow / medium / high / auto）通过批量大小与 ack 间延迟区分。
+**Lockstep speed control.** C++ pauses immediately after startup. The browser sends an `{ type: "ack", count: N }` message, which the server converts into N `n` step commands written to C++ stdin. Different speed levels (`step`, `slow`, `medium`, `high`, `auto`) are distinguished by batch size and the delay between acknowledgments.
 
-**Web 可视化前端**（Nuxt 4 / Vue 3 / Pinia / Three.js / Chart.js）提供四类视图：Dashboard（KPI 卡片 + 图表）、3D Grid（Three.js InstancedMesh 渲染）、Heatmap（逐层流量密度）、Failure Analysis（故障地图 + 时间线），以及 Quad 四合一布局。Pinia store 对大型数据（网格、活跃请求 Map、累计流量矩阵）使用 `shallowRef` + `triggerRef` 避免深度响应性开销。
+**The Web visualization frontend** (Nuxt 4 / Vue 3 / Pinia / Three.js / Chart.js) provides four view types: Dashboard (KPI cards plus charts), 3D Grid (rendered with Three.js InstancedMesh), Heatmap (per-layer traffic density), Failure Analysis (fault map plus timeline), and a Quad four-in-one layout. The Pinia store uses `shallowRef` and `triggerRef` for large datasets such as the grid, active-request map, and cumulative traffic matrix to avoid deep reactivity overhead.
 
-### 3.4.2 初步仿真测试与结果分析
+### 3.4.2 Preliminary Simulation Tests and Result Analysis
 
-测试采用默认配置：4 层、16×16 阵列（`grid_factor=4`）、Shared Spare 冗余布局，固定随机种子。
+The tests used the default configuration: 4 layers, a 16×16 array (`grid_factor=4`), the Shared Spare redundancy layout, and a fixed random seed.
 
-**基线场景**（仅初始化失效，失效率 \(10^{-5}\)，5000 周期）：生成 542 个请求，完成 56 个，失败 0 个，在途 486 个，平均延迟 2157.34 周期。验证了请求生成、路径规划、传输推进与统计流程的正确性。
+**Baseline scenario** (initial failures only, failure rate \(10^{-5}\), 5000 cycles): 542 requests were generated, 56 were completed, 0 failed, 486 remained in flight, and the average latency was 2157.34 cycles. This validated the correctness of request generation, path planning, transmission advancement, and the statistics pipeline.
 
-**压力场景**（组合故障模式，失效率 \(10^{-4}\)）：生成 539 个请求，完成 48 个，累计 287 个失效 TSV 与 29 个失效冗余 TSV。平台在高故障强度下仍能持续完成故障注入、状态更新与路径重计算。
+**Stress scenario** (combined fault mode, failure rate \(10^{-4}\)): 539 requests were generated, 48 were completed, and the run accumulated 287 failed TSVs plus 29 failed redundant TSVs. Even at high fault intensity, the platform continued to inject faults, update state, and recompute routes successfully.
 
-初步测试表明平台已完成从理论模型到工程实现的关键过渡。后续将开展更大规模阵列仿真与算法对比实验。
+These initial tests show that the platform has completed the key transition from theoretical model to engineering implementation. Next steps include larger-scale array simulations and algorithm comparison experiments.
 
-## 4.3 技术路线优化与完善
+## 4.3 Technical Roadmap Optimization and Refinement
 
-后续工作围绕"建模→算法→平台验证→反馈迭代"闭环展开：
+Future work follows a closed loop of modeling, algorithm design, platform validation, and feedback-driven iteration:
 
-1. **故障模型-代价函数-评价指标对齐**：确保 \(\lambda_1\)、\(\lambda_2\) 权重、\(L_{\max}\)、\(R_{\min}\) 约束与实验评价指标体系一致。
-2. **A\* + 强化学习融合**：将 RL 模块接入现有仿真平台，提高动态故障与复杂流量下的自适应路由能力。
-3. **标准化实验矩阵**：以阵列规模、故障模式/率、冗余布局、随机种子为变量，构建可复现的对比实验框架。
-4. **平台与可视化增强**：扩展关键事件回放、多场景对比视图等能力，支撑论文与结题验收。
+1. **Align the fault model, cost function, and evaluation metrics**: ensure that \(\lambda_1\), \(\lambda_2\), \(L_{\max}\), and \(R_{\min}\) match the experimental evaluation framework.
+2. **Integrate A\* with reinforcement learning**: connect an RL module to the existing simulation platform to improve adaptive routing under dynamic faults and complex traffic.
+3. **Build a standardized experiment matrix**: vary array size, fault mode/rate, redundancy layout, and random seed to create a reproducible comparison framework.
+4. **Enhance the platform and visualization stack**: extend support for key-event replay and multi-scenario comparison views to support papers and project review.
