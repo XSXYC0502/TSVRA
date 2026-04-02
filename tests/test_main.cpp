@@ -210,11 +210,13 @@ bool test_config_setters_roundtrip() {
     cfg.set_horizontal_delay(800);
     cfg.set_simulation_cycles(50000);
     cfg.set_random_seed(123);
+    cfg.set_max_horizontal_distance(12);
     ASSERT_EQ(cfg.get_num_layers(), 6u);
     ASSERT_EQ(cfg.get_random_seed(), 123u);
     ASSERT_EQ(cfg.get_vertical_delay(), 10u);
     ASSERT_EQ(cfg.get_horizontal_delay(), 800u);
     ASSERT_EQ(cfg.get_simulation_cycles(), 50000u);
+    ASSERT_EQ(cfg.get_max_horizontal_distance(), 12u);
     return true;
 }
 // ============================================================
@@ -416,6 +418,36 @@ bool test_router_manhattan_heuristic() {
     ASSERT_EQ(tsvra::Router::manhattan_distance(b, a), d);
     // same point
     ASSERT_EQ(tsvra::Router::manhattan_distance(a, a), 0.0);
+    return true;
+}
+
+bool test_router_horizontal_distance_limit() {
+    auto cfg = make_config(3, 1, 1000, 42,
+        tsvra::RedundancyLayout::NONE,
+        tsvra::FailureMode::INITIAL_ONLY, 0.0);
+    cfg.set_max_horizontal_distance(5);
+    std::mt19937 rng(42);
+    tsvra::Grid grid(cfg);
+    grid.initialize(rng);
+    tsvra::Router router(grid, cfg);
+    auto result = router.route({0, 0, 0}, {3, 3, 2}, 0);
+    ASSERT_FALSE(result.has_value());
+
+    cfg.set_max_horizontal_distance(6);
+    std::mt19937 rng2(42);
+    tsvra::Grid grid2(cfg);
+    grid2.initialize(rng2);
+    tsvra::Router router2(grid2, cfg);
+    auto exact_result = router2.route({0, 0, 0}, {3, 3, 2}, 0);
+    ASSERT_TRUE(exact_result.has_value());
+
+    uint64_t horizontal_distance = 0;
+    const auto& path = exact_result->first;
+    for (size_t i = 1; i < path.size(); ++i) {
+        horizontal_distance += static_cast<uint64_t>(
+            std::abs(path[i].x - path[i - 1].x) + std::abs(path[i].y - path[i - 1].y));
+    }
+    ASSERT_EQ(horizontal_distance, 6u);
     return true;
 }
 // ============================================================
@@ -786,6 +818,7 @@ int main() {
     run_test("router_no_route_all_failed",   test_router_no_route_when_all_failed);
     run_test("router_delay_calculation",     test_router_delay_calculation);
     run_test("router_manhattan_heuristic",   test_router_manhattan_heuristic);
+    run_test("router_horizontal_distance_limit", test_router_horizontal_distance_limit);
 
     // RequestGenerator
     std::cout << "\n--- RequestGenerator ---\n";
@@ -822,7 +855,6 @@ int main() {
               << " passed, " << tests_failed << " failed ===\n";
     return tests_failed > 0 ? 1 : 0;
 }
-
 
 
 

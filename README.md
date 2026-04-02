@@ -80,6 +80,7 @@ Options:
   --failure-rate <rate>     Failure rate (default: 1e-6)
   --vertical-delay <n>      Vertical delay (default: 1)
   --horizontal-delay <n>    Horizontal delay (default: 1000)
+  --max-horizontal-distance <n> Max horizontal hops H_max (default: 0 = unlimited)
   --output <prefix>         Output file prefix (default: tsvra_output)
   --seed <n>                Random seed (default: 0 = random)
   -h, --help                Show help
@@ -111,6 +112,7 @@ Options:
 | `failure_rate` | TSV failure probability | 1e-6 |
 | `vertical_delay` | Vertical transmission delay | 1 |
 | `horizontal_delay` | Horizontal transmission delay | 1000 |
+| `max_horizontal_distance` | Maximum per-request horizontal hops (0 = unlimited) | 0 |
 | `simulation_cycles` | Number of simulation cycles | 100000 |
 | `output_prefix` | Output file prefix | tsvra_output |
 | `random_seed` | Random seed (0 = random) | 0 |
@@ -122,12 +124,13 @@ The simulator generates two CSV files:
 1. **`{prefix}_summary.csv`**: Summary statistics
    - Total, completed, and failed request counts
    - Success rate
+   - Average horizontal distance across terminal requests
    - Average, maximum, and minimum latency
    - TSV failure statistics
 
 2. **`{prefix}_requests.csv`**: Detailed request records
    - Start and destination coordinates for each request
-   - Generation time, completion time, and latency
+   - Generation time, completion time, latency, and horizontal distance
    - Final status (completed/failed)
 
 ## Project Structure

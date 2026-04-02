@@ -28,7 +28,8 @@ double Router::manhattan_distance(const Point& a, const Point& b) {
 std::optional<std::pair<std::vector<Point>, uint64_t>> Router::route(
     const Point& start, 
     const Point& end, 
-    uint64_t current_time
+    uint64_t current_time,
+    uint64_t initial_horizontal_distance
 ) {
     // A* algorithm implementation
     uint32_t grid_size = grid_.get_grid_size();
@@ -39,6 +40,7 @@ std::optional<std::pair<std::vector<Point>, uint64_t>> Router::route(
     const double lambda2 = config_.get_lambda2();
     const double failure_rate = config_.get_failure_rate();
     const uint32_t max_path_length = config_.get_max_path_length();
+    const uint32_t max_horizontal_distance = config_.get_max_horizontal_distance();
     const double reliability_min = config_.get_reliability_min();
 
     // phi(pfail) = -ln(1 - pfail), single-node risk penalty
@@ -70,7 +72,8 @@ std::optional<std::pair<std::vector<Point>, uint64_t>> Router::route(
     
     // Initialize start node
     double h_start = heuristic_(start, end);
-    AStarNode start_node(start, 0.0, h_start, Point(), false, Point(), false, 0, 0.0);
+    AStarNode start_node(start, 0.0, h_start, Point(), false, Point(), false, 0,
+                         initial_horizontal_distance, 0.0);
     open_set.push(start_node);
     nodes[static_cast<size_t>(start.z)][static_cast<size_t>(start.y)][static_cast<size_t>(start.x)] = start_node;
     
@@ -176,6 +179,14 @@ std::optional<std::pair<std::vector<Point>, uint64_t>> Router::route(
                     continue;
                 }
 
+                uint64_t horizontal_increment = static_cast<uint64_t>(manhattan_to_spare)
+                                              + static_cast<uint64_t>(manhattan_from_spare);
+                uint64_t new_horizontal_distance = current.horizontal_distance + horizontal_increment;
+                if (max_horizontal_distance > 0 &&
+                    new_horizontal_distance > max_horizontal_distance) {
+                    continue;
+                }
+
                 // R_min constraint: cumulative risk of 2 nodes
                 double new_risk_sum = current.risk_sum + 2.0 * phi_fail;
                 if (new_risk_sum > max_risk) {
@@ -195,7 +206,8 @@ std::optional<std::pair<std::vector<Point>, uint64_t>> Router::route(
                 
                 if (!neighbor_node.has_parent || new_g_cost < neighbor_node.g_cost) {
                     neighbor_node = AStarNode(neighbor, new_g_cost, h_cost, current.position, true,
-                                              redundant_pos, true, new_hop_count, new_risk_sum);
+                                              redundant_pos, true, new_hop_count,
+                                              new_horizontal_distance, new_risk_sum);
                     open_set.push(neighbor_node);
                 }
                 continue;
@@ -222,6 +234,13 @@ std::optional<std::pair<std::vector<Point>, uint64_t>> Router::route(
                 continue;
             }
 
+            uint64_t horizontal_increment = is_vertical_move ? 0ull : 1ull;
+            uint64_t new_horizontal_distance = current.horizontal_distance + horizontal_increment;
+            if (max_horizontal_distance > 0 &&
+                new_horizontal_distance > max_horizontal_distance) {
+                continue;
+            }
+
             // R_min constraint
             double new_risk_sum = current.risk_sum + phi_fail;
             if (new_risk_sum > max_risk) {
@@ -243,7 +262,8 @@ std::optional<std::pair<std::vector<Point>, uint64_t>> Router::route(
             // Update the node if this is the first visit or the better path.
             if (!neighbor_node.has_parent || new_g_cost < neighbor_node.g_cost) {
                 neighbor_node = AStarNode(neighbor, new_g_cost, h_cost, current.position, true,
-                                          Point(), false, new_hop_count, new_risk_sum);
+                                          Point(), false, new_hop_count,
+                                          new_horizontal_distance, new_risk_sum);
                 open_set.push(neighbor_node);
             }
         }

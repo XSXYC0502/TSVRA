@@ -15,6 +15,7 @@ Statistics::Statistics(const Config& config)
       total_latency_(0),
       max_latency_(0),
       min_latency_(std::numeric_limits<uint64_t>::max()),
+      total_horizontal_distance_(0),
       redundant_tsv_usages_(0),
       failed_vertical_encounters_(0),
       spare_found_(0),
@@ -33,6 +34,7 @@ void Statistics::record_request_completed(const Request& req) {
     
     uint64_t latency = req.get_latency();
     total_latency_ += latency;
+    total_horizontal_distance_ += req.get_horizontal_distance();
     max_latency_ = std::max(max_latency_, latency);
     min_latency_ = std::min(min_latency_, latency);
     
@@ -42,6 +44,7 @@ void Statistics::record_request_completed(const Request& req) {
 
 void Statistics::record_request_failed(const Request& req) {
     ++failed_requests_;
+    total_horizontal_distance_ += req.get_horizontal_distance();
     failed_requests_list_.push_back(req);
 }
 
@@ -77,6 +80,14 @@ double Statistics::get_average_latency() const {
     return static_cast<double>(total_latency_) / static_cast<double>(completed_requests_);
 }
 
+double Statistics::get_average_horizontal_distance() const {
+    uint64_t terminal_requests = completed_requests_ + failed_requests_;
+    if (terminal_requests == 0) {
+        return 0.0;
+    }
+    return static_cast<double>(total_horizontal_distance_) / static_cast<double>(terminal_requests);
+}
+
 void Statistics::print_summary() const {
     std::cout << "\n=================================\n";
     std::cout << "    Simulation Statistics\n";
@@ -93,14 +104,13 @@ void Statistics::print_summary() const {
         std::cout << "  Success rate:       " << std::fixed << std::setprecision(2) << success_rate << "%\n";
     }
     
-    // Latency statistics
-    std::cout << "\nLatency Statistics:\n";
-    if (completed_requests_ > 0) {
-        std::cout << "  Average latency:    " << std::fixed << std::setprecision(2) << get_average_latency() << " cycles\n";
-        std::cout << "  Max latency:        " << max_latency_ << " cycles\n";
-        std::cout << "  Min latency:        " << min_latency_ << " cycles\n";
+    std::cout << "\nHorizontal Distance Statistics:\n";
+    if (completed_requests_ + failed_requests_ > 0) {
+        std::cout << "  Average horizontal distance: "
+                  << std::fixed << std::setprecision(2)
+                  << get_average_horizontal_distance() << " hops\n";
     } else {
-        std::cout << "  No completed requests\n";
+        std::cout << "  No terminal requests\n";
     }
     
     // TSV statistics
@@ -134,6 +144,8 @@ void Statistics::export_to_csv(const std::string& filename) const {
         file << "Max Latency," << max_latency_ << "\n";
         file << "Min Latency," << min_latency_ << "\n";
     }
+    file << "Average Horizontal Distance," << get_average_horizontal_distance() << "\n";
+    file << "Total Horizontal Distance," << total_horizontal_distance_ << "\n";
     
     file << "Failed TSVs," << current_failed_tsvs_ << "\n";
     file << "Failed Redundant TSVs," << current_failed_redundant_tsvs_ << "\n";
@@ -167,7 +179,7 @@ void Statistics::export_requests_to_csv(const std::string& filename) const {
     }
 
     file << "Request ID,Start X,Start Y,Start Z,End X,End Y,End Z,"
-         << "Generate Time,Complete Time,Latency,Status\n";
+         << "Generate Time,Complete Time,Latency,Horizontal Distance,Status\n";
 
     // Export completed requests
     for (const auto& req : completed_requests_list_) {
@@ -175,7 +187,7 @@ void Statistics::export_requests_to_csv(const std::string& filename) const {
              << req.start.x << "," << req.start.y << "," << req.start.z << ","
              << req.end.x << "," << req.end.y << "," << req.end.z << ","
              << req.generate_time << "," << req.complete_time << ","
-             << req.get_latency() << ",Completed\n";
+             << req.get_latency() << "," << req.get_horizontal_distance() << ",Completed\n";
     }
     
     // Export failed requests
@@ -183,7 +195,7 @@ void Statistics::export_requests_to_csv(const std::string& filename) const {
         file << req.id << ","
              << req.start.x << "," << req.start.y << "," << req.start.z << ","
              << req.end.x << "," << req.end.y << "," << req.end.z << ","
-             << req.generate_time << ",N/A,N/A,Failed\n";
+             << req.generate_time << ",N/A,N/A," << req.get_horizontal_distance() << ",Failed\n";
     }
     
     file.close();
@@ -191,4 +203,3 @@ void Statistics::export_requests_to_csv(const std::string& filename) const {
 }
 
 } // namespace tsvra
-

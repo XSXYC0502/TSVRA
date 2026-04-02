@@ -49,9 +49,11 @@ public:
     uint64_t get_completed_requests() const { return completed_requests_; }
     uint64_t get_failed_requests() const { return failed_requests_; }
     double get_average_latency() const;
+    double get_average_horizontal_distance() const;
     uint64_t get_max_latency() const { return max_latency_; }
     uint64_t get_min_latency() const { return min_latency_; }
     uint64_t get_total_latency() const { return total_latency_; }
+    uint64_t get_total_horizontal_distance() const { return total_horizontal_distance_; }
     uint64_t get_redundant_tsv_usages() const { return redundant_tsv_usages_; }
     uint64_t get_failed_vertical_encounters() const { return failed_vertical_encounters_; }
     uint64_t get_spare_found() const { return spare_found_; }
@@ -75,6 +77,7 @@ private:
     uint64_t max_latency_;
     uint64_t min_latency_;
     std::vector<uint64_t> latency_samples_;
+    uint64_t total_horizontal_distance_;
     
     // TSV statistics
     uint64_t redundant_tsv_usages_;
@@ -93,4 +96,3 @@ private:
 } // namespace tsvra
 
 #endif // TSVRA_STATISTICS_HPP
-

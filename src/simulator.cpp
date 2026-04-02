@@ -3,6 +3,7 @@
 #include <iomanip>
 #include <sstream>
 #include <algorithm>
+#include <cstdlib>
 #include <chrono>
 #include <limits>
 #include <mutex>
@@ -33,6 +34,11 @@ void start_stdin_command_reader() {
             }
         }).detach();
     });
+}
+
+bool exceeds_horizontal_distance_limit(const tsvra::Config& config, const tsvra::Request& req) {
+    const uint32_t limit = config.get_max_horizontal_distance();
+    return limit > 0 && req.get_horizontal_distance() > limit;
 }
 
 } // namespace
@@ -518,13 +524,14 @@ void Simulator::run() {
         std::cout << "Simulation cycles: " << config_.get_simulation_cycles() << "\n\n";
 
         uint64_t total_cycles = config_.get_simulation_cycles();
-        uint64_t progress_interval = total_cycles / 20; // Show progress every 5%
+        constexpr uint64_t progress_interval = 100;
 
         for (current_cycle_ = 0; current_cycle_ < total_cycles; ++current_cycle_) {
             simulate_cycle();
 
-            // Show progress
-            if (progress_interval > 0 && (current_cycle_ + 1) % progress_interval == 0) {
+            // Show progress every 100 cycles and always emit the last cycle.
+            if ((current_cycle_ + 1) % progress_interval == 0 ||
+                current_cycle_ + 1 == total_cycles) {
                 print_progress();
             }
         }
@@ -692,7 +699,7 @@ void Simulator::process_pending_requests() {
 
 bool Simulator::route_request(Request& req) {
     // Use router to compute path
-    auto result = router_->route(req.start, req.end, current_cycle_);
+    auto result = router_->route(req.start, req.end, current_cycle_, req.horizontal_distance);
 
     if (!result.has_value()) {
         // Route failed
@@ -720,7 +727,7 @@ bool Simulator::reroute_request(Request& req) {
     // Note: current_hop has been incremented in update_transmitting_requests,
     // pointing to the failed next hop; actual position is current_hop-1
     Point actual_pos = (req.current_hop > 0) ? req.path[req.current_hop - 1] : req.path[0];
-    auto result = router_->route(actual_pos, req.end, current_cycle_);
+    auto result = router_->route(actual_pos, req.end, current_cycle_, req.horizontal_distance);
 
     if (!result.has_value()) {
         // Reroute failed
@@ -780,6 +787,30 @@ void Simulator::update_transmitting_requests() {
 
         // Check if it's time to advance to the next hop
         if (current_cycle_ >= req.next_hop_time && req.current_hop < req.path.size()) {
+            if (req.current_hop > 0) {
+                const Point& from = req.path[req.current_hop - 1];
+                const Point& to = req.path[req.current_hop];
+                req.horizontal_distance += static_cast<uint64_t>(
+                    std::abs(to.x - from.x) + std::abs(to.y - from.y));
+
+                if (exceeds_horizontal_distance_limit(config_, req)) {
+                    decrement_path_usage(req.path);
+                    req.status = RequestStatus::FAILED;
+                    stats_.record_request_failed(req);
+
+                    if (json_stream_mode_) {
+                        JsonFailed jf;
+                        jf.id = req.id;
+                        jf.time = current_cycle_;
+                        jf.reason = "horizontal_distance_exceeded";
+                        cycle_failed_.push_back(jf);
+                    }
+
+                    it = transmitting_requests_.erase(it);
+                    continue;
+                }
+            }
+
             // Advance to next hop
             req.current_hop++;
 
@@ -895,7 +926,8 @@ void Simulator::print_progress() const {
               << "(" << current_cycle_ + 1 << "/" << config_.get_simulation_cycles() << ") "
               << "Requests: " << stats_.get_total_requests()
               << " (Completed: " << stats_.get_completed_requests()
-              << ", Failed: " << stats_.get_failed_requests() << ")\n";
+              << ", Failed: " << stats_.get_failed_requests() << ")\n"
+              << std::flush;
 }
 
 } // namespace tsvra

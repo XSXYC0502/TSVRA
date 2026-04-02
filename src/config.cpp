@@ -36,6 +36,7 @@ Config::Config()
       lambda1_(0.0),
       lambda2_(0.0),
       max_path_length_(0),
+      max_horizontal_distance_(0),
       reliability_min_(0.0),
       json_stream_(false),
       redundancy_layout_(RedundancyLayout::SHARED_SPARE),
@@ -88,6 +89,8 @@ bool Config::load_from_file(const std::string& filename) {
                 lambda2_ = std::stod(value);
             } else if (key == "max_path_length") {
                 max_path_length_ = static_cast<uint32_t>(std::stoul(value));
+            } else if (key == "max_horizontal_distance") {
+                max_horizontal_distance_ = static_cast<uint32_t>(std::stoul(value));
             } else if (key == "reliability_min") {
                 reliability_min_ = std::stod(value);
             } else if (key == "redundancy") {
@@ -126,6 +129,7 @@ bool Config::parse_command_line(int argc, char* argv[]) {
                       << "  --lambda1 <v>             Congestion weight lambda1 (default: 0.0=disabled)\n"
                       << "  --lambda2 <v>             Risk weight lambda2 (default: 0.0=disabled)\n"
                       << "  --max-path-length <n>     Max path hops L_max (default: 0=unlimited)\n"
+                      << "  --max-horizontal-distance <n> Max horizontal hops H_max (default: 0=unlimited)\n"
                       << "  --reliability-min <v>     Min path reliability R_min (default: 0.0=unconstrained)\n"
                       << "  --redundancy <layout>     Redundancy layout: corner4|shared|none (default: shared)\n"
                       << "  --failure-model <model>   Failure model: uniform|clustered (default: uniform)\n"
@@ -163,6 +167,8 @@ bool Config::parse_command_line(int argc, char* argv[]) {
             lambda2_ = std::stod(argv[++i]);
         } else if (arg == "--max-path-length" && i + 1 < argc) {
             max_path_length_ = static_cast<uint32_t>(std::stoul(argv[++i]));
+        } else if (arg == "--max-horizontal-distance" && i + 1 < argc) {
+            max_horizontal_distance_ = static_cast<uint32_t>(std::stoul(argv[++i]));
         } else if (arg == "--reliability-min" && i + 1 < argc) {
             reliability_min_ = std::stod(argv[++i]);
         } else if (arg == "--redundancy" && i + 1 < argc) {
@@ -254,6 +260,7 @@ void Config::print() const {
               << "Congestion weight lambda1: " << lambda1_ << (lambda1_ == 0.0 ? " (disabled)" : "") << "\n"
               << "Risk weight lambda2: " << lambda2_ << (lambda2_ == 0.0 ? " (disabled)" : "") << "\n"
               << "Max path length L_max: " << (max_path_length_ == 0 ? "unlimited" : std::to_string(max_path_length_)) << "\n"
+              << "Max horizontal distance H_max: " << (max_horizontal_distance_ == 0 ? "unlimited" : std::to_string(max_horizontal_distance_)) << "\n"
               << "Min reliability R_min: " << reliability_min_ << (reliability_min_ == 0.0 ? " (unconstrained)" : "") << "\n"
               << "Redundancy layout: " << redundancy_layout_to_string(redundancy_layout_) << "\n"
               << "Failure model: " << failure_model_to_string(failure_model_) << "\n";
@@ -281,6 +288,7 @@ std::string Config::to_json() const {
         << "  \"lambda1\": " << lambda1_ << ",\n"
         << "  \"lambda2\": " << lambda2_ << ",\n"
         << "  \"max_path_length\": " << max_path_length_ << ",\n"
+        << "  \"max_horizontal_distance\": " << max_horizontal_distance_ << ",\n"
         << "  \"reliability_min\": " << reliability_min_ << ",\n"
         << "  \"redundancy\": {\n"
         << "    \"layout\": \"" << redundancy_layout_to_string(redundancy_layout_) << "\",\n"

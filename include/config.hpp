@@ -67,6 +67,7 @@ public:
     double get_lambda1() const { return lambda1_; }
     double get_lambda2() const { return lambda2_; }
     uint32_t get_max_path_length() const { return max_path_length_; }
+    uint32_t get_max_horizontal_distance() const { return max_horizontal_distance_; }
     double get_reliability_min() const { return reliability_min_; }
     bool get_json_stream() const { return json_stream_; }
     RedundancyLayout get_redundancy_layout() const { return redundancy_layout_; }
@@ -87,6 +88,7 @@ public:
     void set_lambda1(double v) { lambda1_ = v; }
     void set_lambda2(double v) { lambda2_ = v; }
     void set_max_path_length(uint32_t v) { max_path_length_ = v; }
+    void set_max_horizontal_distance(uint32_t v) { max_horizontal_distance_ = v; }
     void set_reliability_min(double v) { reliability_min_ = v; }
     void set_json_stream(bool v) { json_stream_ = v; }
     void set_redundancy_layout(RedundancyLayout v) { redundancy_layout_ = v; }
@@ -106,6 +108,7 @@ private:
     double lambda1_;                // Congestion weight (λ1), default 0.0
     double lambda2_;                // Risk weight (λ2), default 0.0
     uint32_t max_path_length_;      // Maximum path length (L_max), 0 means unlimited
+    uint32_t max_horizontal_distance_; // Maximum horizontal distance (H_max), 0 means unlimited
     double reliability_min_;        // Minimum path reliability (R_min), 0.0 means unconstrained
     bool json_stream_;              // JSON streaming output mode
     RedundancyLayout redundancy_layout_; // Redundancy layout strategy
@@ -125,4 +128,3 @@ private:
 } // namespace tsvra
 
 #endif // TSVRA_CONFIG_HPP
-

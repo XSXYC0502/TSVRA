@@ -195,6 +195,8 @@ Two pruning constraints are applied during A* expansion:
 
 **Maximum path length (L_max)**: Paths exceeding `max_path_length` hops are pruned. When set to 0 (default), no limit is enforced.
 
+**Maximum horizontal distance (H_max)**: Paths exceeding `max_horizontal_distance` horizontal hops are pruned. During transmission, if rerouting would push an in-flight request beyond this limit, the request is terminated and marked failed. When set to 0 (default), no limit is enforced.
+
 **Minimum reliability (R_min)**: The path reliability is defined as:
 
 ```
@@ -243,6 +245,7 @@ The simulation collects and exports:
 - Terminal Delivery Rate (%): completed / (completed + failed) (excludes in-flight requests)
 - Route Failure Rate (%): failed / total_generated
 - In Flight At Horizon: count of requests still transmitting when simulation ends
+- Average Horizontal Distance: average across terminal requests
 - Latency: min, max, average (for completed requests only)
 - TSV failure count (total and redundant)
 - Redundant TSV usages: count of bypass operations
@@ -252,7 +255,7 @@ The simulation collects and exports:
 **Per-request details** (`{prefix}_requests.csv`):
 - Source and destination coordinates
 - Generation time, completion time
-- Latency, final status
+- Latency, horizontal distance, final status
 
 ## 9. Configuration Parameters
 
@@ -270,6 +273,7 @@ The simulation collects and exports:
 | `lambda1` | Congestion weight (λ1) | 0.0 (disabled) |
 | `lambda2` | Reliability risk weight (λ2) | 0.0 (disabled) |
 | `max_path_length` | Maximum path hops (L_max, 0=unlimited) | 0 |
+| `max_horizontal_distance` | Maximum per-request horizontal hops (H_max, 0=unlimited) | 0 |
 | `reliability_min` | Minimum path reliability (R_min, 0=no constraint) | 0.0 |
 | `redundancy` | Redundancy layout: shared / corner4 / none | shared |
 | `failure_model` | Failure distribution: uniform / clustered | uniform |

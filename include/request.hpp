@@ -39,6 +39,7 @@ struct Request {
     Point end;                  // End point (x1, y1, maxZ)
     uint64_t generate_time;     // Generation time
     uint64_t complete_time;     // Completion time (0 means not completed)
+    uint64_t horizontal_distance;// Accumulated horizontal movement
     bool completed;             // Whether completed
     std::vector<Point> path;    // Path (computed by routing algorithm)
     RequestStatus status;       // Request status
@@ -47,16 +48,20 @@ struct Request {
     
     Request() 
         : id(0), start(), end(), generate_time(0), 
-          complete_time(0), completed(false), status(RequestStatus::PENDING),
+          complete_time(0), horizontal_distance(0), completed(false), status(RequestStatus::PENDING),
           current_hop(0), next_hop_time(0) {}
     
     Request(uint64_t id_, Point start_, Point end_, uint64_t gen_time)
         : id(id_), start(start_), end(end_), generate_time(gen_time),
-          complete_time(0), completed(false), status(RequestStatus::PENDING),
+          complete_time(0), horizontal_distance(0), completed(false), status(RequestStatus::PENDING),
           current_hop(0), next_hop_time(gen_time) {}
     
     uint64_t get_latency() const {
         return completed ? (complete_time - generate_time) : 0;
+    }
+
+    uint64_t get_horizontal_distance() const {
+        return horizontal_distance;
     }
     
     // Get current position
@@ -71,4 +76,3 @@ struct Request {
 } // namespace tsvra
 
 #endif // TSVRA_REQUEST_HPP
-

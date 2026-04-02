@@ -26,7 +26,8 @@ public:
     std::optional<std::pair<std::vector<Point>, uint64_t>> route(
         const Point& start, 
         const Point& end, 
-        uint64_t current_time
+        uint64_t current_time,
+        uint64_t initial_horizontal_distance = 0
     );
     
     // Calculate transmission delay of a path
@@ -55,19 +56,20 @@ private:
         Point redundant_via; // If redundant TSV bypass was used, stores the redundant TSV position
         bool used_redundant; // Whether a redundant TSV was used
         uint32_t hop_count; // Hop count from start (for L_max constraint)
+        uint64_t horizontal_distance; // Horizontal distance from request origin (for H_max constraint)
         double risk_sum;    // Cumulative risk sum(-ln(1-pfail)) (for R_min constraint)
 
         AStarNode()
             : position(), g_cost(0), h_cost(0), f_cost(0),
               parent(), has_parent(false), redundant_via(), used_redundant(false),
-              hop_count(0), risk_sum(0.0) {}
+              hop_count(0), horizontal_distance(0), risk_sum(0.0) {}
 
         AStarNode(Point pos, double g, double h, Point p, bool hp,
                   Point rv = Point(), bool ur = false,
-                  uint32_t hc = 0, double rs = 0.0)
+                  uint32_t hc = 0, uint64_t hd = 0, double rs = 0.0)
             : position(pos), g_cost(g), h_cost(h), f_cost(g + h),
               parent(p), has_parent(hp), redundant_via(rv), used_redundant(ur),
-              hop_count(hc), risk_sum(rs) {}
+              hop_count(hc), horizontal_distance(hd), risk_sum(rs) {}
     };
     
     // A* algorithm helper functions
@@ -86,4 +88,3 @@ private:
 } // namespace tsvra
 
 #endif // TSVRA_ROUTER_HPP
-
