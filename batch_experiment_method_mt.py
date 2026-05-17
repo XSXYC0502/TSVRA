@@ -33,22 +33,8 @@ DEFAULT_FAILURE_RATES = [
     0.70,
 ]
 DEFAULT_LAYERS = [2, 3, 4, 5]
-DEFAULT_MAX_HORIZONTAL_DISTANCE = 20
-DEFAULT_REPEAT_COUNTS = {
-    0.05: 4,
-    0.10: 4,
-    0.15: 4,
-    0.20: 4,
-    0.25: 4,
-    0.30: 3,
-    0.35: 3,
-    0.40: 3,
-    0.45: 3,
-    0.50: 3,
-    0.60: 2,
-    0.70: 2,
-}
-SEED_POOL = [42, 123, 7, 256, 314, 500, 617, 789]
+DEFAULT_MAX_HORIZONTAL_DISTANCE = 25
+SEED_POOL = [42 + index for index in range(64)]
 PROGRESS_RE = re.compile(r"\((\d+)/(\d+)\)")
 REQUEST_COUNT_RE = re.compile(r"请求:\s*(\d+)|requests?:\s*(\d+)", re.IGNORECASE)
 
@@ -100,7 +86,7 @@ def parse_args() -> argparse.Namespace:
         "--output-dir",
         type=Path,
         default=Path("output"),
-        help="Directory for final CSV outputs.",
+        help="Directory for final TSV/Markdown outputs.",
     )
     parser.add_argument(
         "--jobs",
@@ -176,11 +162,20 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def repeat_count_for_failure_rate(failure_rate: float) -> int:
+    failure_rate_pct = int(round(failure_rate * 100))
+    if failure_rate_pct >= 30:
+        return 10
+    if failure_rate_pct >= 20:
+        return 20
+    return 50
+
+
 def build_tasks(layers: Iterable[int], failure_rates: Iterable[float]) -> List[RunTask]:
     tasks: List[RunTask] = []
     for layer_count in layers:
         for failure_rate in failure_rates:
-            repeats = DEFAULT_REPEAT_COUNTS.get(failure_rate, 1)
+            repeats = repeat_count_for_failure_rate(failure_rate)
             if repeats > len(SEED_POOL):
                 raise ValueError(
                     f"Not enough seeds for failure_rate={failure_rate}: {repeats}"
@@ -340,18 +335,17 @@ def run_single_task(
 
     metrics = parse_metric_csv(summary_path)
     completed_requests = to_int(metrics, "Completed Requests")
-    failed_requests = to_int(metrics, "Failed Requests")
     average_horizontal_distance = metric_float(metrics, "Average Horizontal Distance")
-    terminal_requests = completed_requests + failed_requests
-    total_horizontal_distance = average_horizontal_distance * terminal_requests
+    total_requests = to_int(metrics, "Total Requests")
+    correct_rate = (
+        completed_requests * 100.0 / total_requests if total_requests else 0.0
+    )
 
     summary_row = {
         "total_failure_rate_pct": task.failure_rate_pct,
         "layers": task.layers,
-        "total_requests": to_int(metrics, "Total Requests"),
-        "completed_requests": completed_requests,
-        "failed_requests": failed_requests,
         "average_horizontal_distance": average_horizontal_distance,
+        "correct_rate": correct_rate,
     }
 
     summary_path.unlink(missing_ok=True)
@@ -365,7 +359,6 @@ def run_single_task(
     return {
         "task": task,
         "summary_row": summary_row,
-        "total_horizontal_distance": total_horizontal_distance,
     }
 
 
@@ -373,10 +366,8 @@ def init_aggregate(expected_runs: int) -> Dict[str, float]:
     return {
         "expected_runs": expected_runs,
         "runs": 0,
-        "total_requests": 0,
-        "completed_requests": 0,
-        "failed_requests": 0,
-        "total_horizontal_distance": 0,
+        "horizontal_distance_sum": 0.0,
+        "correct_rate_sum": 0.0,
     }
 
 
@@ -384,16 +375,13 @@ def update_aggregate(
     aggregate: Dict[Tuple[int, int], Dict[str, float]],
     task: RunTask,
     summary_row: Dict[str, object],
-    total_horizontal_distance: float,
     repeats_by_rate: Dict[float, int],
 ) -> None:
     key = (task.failure_rate_pct, task.layers)
     slot = aggregate.setdefault(key, init_aggregate(repeats_by_rate[task.failure_rate]))
     slot["runs"] += 1
-    slot["total_requests"] += int(summary_row["total_requests"])
-    slot["completed_requests"] += int(summary_row["completed_requests"])
-    slot["failed_requests"] += int(summary_row["failed_requests"])
-    slot["total_horizontal_distance"] += total_horizontal_distance
+    slot["horizontal_distance_sum"] += float(summary_row["average_horizontal_distance"])
+    slot["correct_rate_sum"] += float(summary_row["correct_rate"])
 
 
 def finalize_pdf_row(
@@ -401,24 +389,28 @@ def finalize_pdf_row(
     layers: int,
     slot: Dict[str, float],
 ) -> Dict[str, str]:
-    terminal_requests = int(slot["completed_requests"] + slot["failed_requests"])
-    total_requests = int(slot["total_requests"])
+    runs = int(slot["runs"])
     average_horizontal_distance = (
-        slot["total_horizontal_distance"] / terminal_requests
-        if terminal_requests
-        else 0.0
+        slot["horizontal_distance_sum"] / runs if runs else 0.0
     )
-    correct_rate = (
-        slot["completed_requests"] * 100.0 / total_requests
-        if total_requests
-        else 0.0
-    )
+    correct_rate = slot["correct_rate_sum"] / runs if runs else 0.0
     return {
         "总故障率": f"{failure_rate_pct}%",
         "层数": str(layers),
         "Horizontal Distance": f"{average_horizontal_distance:.6f}",
         "正确率": f"{correct_rate:.6f}%",
     }
+
+
+def write_tsv_table(
+    path: Path,
+    rows: List[Dict[str, str]],
+    fieldnames: List[str],
+) -> None:
+    with path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames, delimiter="\t")
+        writer.writeheader()
+        writer.writerows(rows)
 
 
 def write_markdown_table(
@@ -493,7 +485,7 @@ def main() -> int:
     tasks = build_tasks(args.layers, args.failure_rates)
     total_task_count = len(tasks)
     repeats_by_rate = {
-        rate: DEFAULT_REPEAT_COUNTS.get(rate, 1) for rate in args.failure_rates
+        rate: repeat_count_for_failure_rate(rate) for rate in args.failure_rates
     }
     progress_lock = threading.Lock()
     progress_by_run_id = {
@@ -501,7 +493,8 @@ def main() -> int:
         for task in tasks
     }
 
-    table_csv = output_dir / "experiment_method_summary.csv"
+    legacy_table_csv = output_dir / "experiment_method_summary.csv"
+    table_tsv = output_dir / "experiment_method_summary.tsv"
     table_md = output_dir / "experiment_method_summary.md"
     table_fieldnames = [
         "总故障率",
@@ -509,109 +502,103 @@ def main() -> int:
         "Horizontal Distance",
         "正确率",
     ]
-    written_rows: List[Dict[str, str]] = []
 
     aggregate: Dict[Tuple[int, int], Dict[str, float]] = {}
 
-    with table_csv.open("w", newline="", encoding="utf-8") as table_handle:
-        table_writer = csv.DictWriter(
-            table_handle,
-            fieldnames=table_fieldnames,
-        )
-        table_writer.writeheader()
+    with ThreadPoolExecutor(max_workers=args.jobs) as executor:
+        future_to_task = {
+            executor.submit(
+                run_single_task,
+                binary,
+                tmp_dir,
+                args.cycles,
+                args.grid_factor,
+                args.failure_mode,
+                args.redundancy,
+                args.failure_model,
+                args.cluster_strength,
+                args.cluster_radius,
+                args.max_horizontal_distance,
+                task,
+                progress_by_run_id[task.run_id],
+                progress_lock,
+            ): task
+            for task in tasks
+        }
+        pending_futures = set(future_to_task)
+        rendered_run_id: Optional[str] = None
 
-        with ThreadPoolExecutor(max_workers=args.jobs) as executor:
-            future_to_task = {
-                executor.submit(
-                    run_single_task,
-                    binary,
-                    tmp_dir,
-                    args.cycles,
-                    args.grid_factor,
-                    args.failure_mode,
-                    args.redundancy,
-                    args.failure_model,
-                    args.cluster_strength,
-                    args.cluster_radius,
-                    args.max_horizontal_distance,
-                    task,
-                    progress_by_run_id[task.run_id],
+        with tqdm(
+            total=args.cycles,
+            desc="waiting",
+            unit="cycle",
+            dynamic_ncols=True,
+            leave=True,
+            position=0,
+        ) as progress, tqdm(
+            total=total_task_count,
+            desc="Experiment sweep",
+            unit="run",
+            dynamic_ncols=True,
+            leave=True,
+            position=1,
+        ) as sweep_progress:
+            while pending_futures:
+                display_task = get_first_unfinished_task(
+                    tasks,
+                    progress_by_run_id,
                     progress_lock,
-                ): task
-                for task in tasks
-            }
-            pending_futures = set(future_to_task)
-            rendered_run_id: Optional[str] = None
-
-            with tqdm(
-                total=args.cycles,
-                desc="waiting",
-                unit="cycle",
-                dynamic_ncols=True,
-                leave=True,
-                position=0,
-            ) as progress, tqdm(
-                total=total_task_count,
-                desc="Experiment sweep",
-                unit="run",
-                dynamic_ncols=True,
-                leave=True,
-                position=1,
-            ) as sweep_progress:
-                while pending_futures:
-                    display_task = get_first_unfinished_task(
-                        tasks,
+                )
+                if display_task is not None:
+                    task_state = snapshot_task_progress(
                         progress_by_run_id,
+                        display_task.run_id,
                         progress_lock,
                     )
-                    if display_task is not None:
-                        task_state = snapshot_task_progress(
-                            progress_by_run_id,
-                            display_task.run_id,
-                            progress_lock,
-                        )
-                        if rendered_run_id != display_task.run_id:
-                            progress.reset(total=task_state.total_cycles)
-                            progress.set_description(display_task.run_id)
-                            rendered_run_id = display_task.run_id
+                    if rendered_run_id != display_task.run_id:
+                        progress.reset(total=task_state.total_cycles)
+                        progress.set_description(display_task.run_id)
+                        rendered_run_id = display_task.run_id
 
-                        progress.n = min(task_state.current_cycle, task_state.total_cycles)
-                        progress.set_postfix_str(progress_postfix(task_state))
-                        progress.refresh()
+                    progress.n = min(task_state.current_cycle, task_state.total_cycles)
+                    progress.set_postfix_str(progress_postfix(task_state))
+                    progress.refresh()
 
-                    done_futures, pending_futures = wait(
-                        pending_futures,
-                        timeout=0.2,
-                        return_when=FIRST_COMPLETED,
+                done_futures, pending_futures = wait(
+                    pending_futures,
+                    timeout=0.2,
+                    return_when=FIRST_COMPLETED,
+                )
+
+                for future in done_futures:
+                    task = future_to_task[future]
+                    result = future.result()
+                    summary_row = result["summary_row"]
+
+                    update_aggregate(
+                        aggregate,
+                        task,
+                        summary_row,
+                        repeats_by_rate,
                     )
+                    sweep_progress.set_postfix_str(task.run_id)
+                    sweep_progress.update(1)
+                time.sleep(0.05)
 
-                    for future in done_futures:
-                        task = future_to_task[future]
-                        result = future.result()
-                        summary_row = result["summary_row"]
-                        total_horizontal_distance = float(result["total_horizontal_distance"])
+    written_rows = []
+    failure_rate_pcts = [int(round(rate * 100)) for rate in args.failure_rates]
+    for layers in args.layers:
+        for failure_rate_pct in failure_rate_pcts:
+            key = (failure_rate_pct, layers)
+            if key not in aggregate:
+                continue
+            written_rows.append(finalize_pdf_row(failure_rate_pct, layers, aggregate[key]))
 
-                        update_aggregate(
-                            aggregate,
-                            task,
-                            summary_row,
-                            total_horizontal_distance,
-                            repeats_by_rate,
-                        )
-                        key = (task.failure_rate_pct, task.layers)
-                        slot = aggregate[key]
-                        if int(slot["runs"]) == int(slot["expected_runs"]):
-                            row = finalize_pdf_row(task.failure_rate_pct, task.layers, slot)
-                            table_writer.writerow(row)
-                            written_rows.append(row)
-                            table_handle.flush()
-                        sweep_progress.set_postfix_str(task.run_id)
-                        sweep_progress.update(1)
-                    time.sleep(0.05)
-
+    legacy_table_csv.unlink(missing_ok=True)
+    write_tsv_table(table_tsv, written_rows, table_fieldnames)
     write_markdown_table(table_md, written_rows, table_fieldnames)
     tmp_dir.rmdir()
-    print(f"Saved: {table_csv}")
+    print(f"Saved: {table_tsv}")
     print(f"Saved: {table_md}")
     return 0
 
