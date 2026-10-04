@@ -2,6 +2,7 @@
 #include "simulator.hpp"
 #include <iostream>
 #include <exception>
+#include <filesystem>
 
 int main(int argc, char* argv[]) {
     try {
@@ -13,19 +14,22 @@ int main(int argc, char* argv[]) {
             return 0; // User requested help or other non-error exit
         }
 
-        // --print-defaults: output default config JSON and exit
-        if (config.get_print_defaults()) {
-            std::cout << config.to_json() << std::endl;
-            return 0;
-        }
-
         // Validate configuration
         if (!config.validate()) {
             std::cerr << "Configuration validation failed\n";
             return 1;
         }
 
+        if (config.get_print_defaults()) {
+            std::cout << config.to_json() << std::endl;
+            return 0;
+        }
+
         bool json_mode = config.get_json_stream();
+        if (!json_mode) {
+            const auto parent = std::filesystem::path(config.get_output_prefix()).parent_path();
+            if (!parent.empty()) std::filesystem::create_directories(parent);
+        }
 
         // Print configuration (skip in json mode or output to stderr)
         if (!json_mode) {
@@ -52,6 +56,7 @@ int main(int argc, char* argv[]) {
 
             stats.export_to_csv(summary_file);
             stats.export_requests_to_csv(requests_file);
+            simulator.export_configuration(config.get_output_prefix() + "_config.json");
 
             std::cout << "Simulation complete, results saved\n";
         }

@@ -1,9 +1,12 @@
 import { defineStore } from 'pinia';
-import { ref, shallowRef, triggerRef } from 'vue';
+import { computed, ref, shallowRef, triggerRef } from 'vue';
+import { defaultLaunchConfig } from '~/shared/simulationConfig';
+import { appendHistory, powerSample } from '~/shared/power';
 import type {
   SimConfig, TSVState, LiveRequest, CompletedRequest, FailedRequest,
   RunningStats, FailureEvent, TimePoint, InitMessage, CycleUpdate,
-  DoneMessage, SimStatus, ViewMode, SpeedMode, ColorMode
+  DoneMessage, SimStatus, ViewMode, SpeedMode, ColorMode, LaunchConfig,
+  RedundancyLayout, Point, FailureProbability, PowerModel, PowerSample
 } from '~/types/simulation';
 
 export const useSimulationStore = defineStore('simulation', () => {
@@ -27,6 +30,9 @@ export const useSimulationStore = defineStore('simulation', () => {
   // Grid state - use shallowRef for large 3D array
   const tsvGrid = shallowRef<TSVState[][][] | null>(null);
   const hotspotWeights = ref<number[][] | null>(null);
+  const failureHotspots = ref<Point[]>([]);
+  const failureProbabilities = shallowRef<FailureProbability[]>([]);
+  const powerModel = ref<PowerModel | null>(null);
 
   // Requests - use shallowRef for Map
   const activeRequests = shallowRef<Map<number, LiveRequest>>(new Map());
@@ -42,10 +48,13 @@ export const useSimulationStore = defineStore('simulation', () => {
   const latencySamples = ref<number[]>([]);
   const throughputTimeline = ref<TimePoint[]>([]);
   const failureTimeline = ref<FailureEvent[]>([]);
+  const failureCountTimeline = ref<TimePoint[]>([]);
+  const powerTimeline = ref<PowerSample[]>([]);
   const failedTSVPositions = ref<{ x: number; y: number; z: number }[]>([]);
 
   // Summary (when done)
   const summary = ref<DoneMessage['summary'] | null>(null);
+  const power = computed(() => summary.value?.power ?? stats.value?.power ?? null);
 
   // UI
   const activeView = ref<ViewMode>('dashboard');
@@ -71,17 +80,22 @@ export const useSimulationStore = defineStore('simulation', () => {
   const heatmapUpdateInterval = ref(10);
 
   // Initialize preview grid from form defaults (before any simulation runs)
-  function initializePreview(gridFactor = 4, numLayers = 2, redundancyLayout: 'shared' | 'none' = 'shared') {
+  function initializePreview(gridFactor = 4, numLayers = 2, redundancyLayout: RedundancyLayout = 'shared') {
     const gridSize = 4 * gridFactor;
+    const defaults = defaultLaunchConfig();
     const previewConfig: SimConfig = {
       gridSize,
       numLayers,
       gridFactor,
-      failureMode: 'c',
-      failureRate: 0.000001,
-      verticalDelay: 1,
-      horizontalDelay: 1000,
-      totalCycles: 10000,
+      failureMode: defaults.failureMode,
+      initialFailureRate: defaults.initialFailureRate,
+      runtimeFailureRate: defaults.runtimeFailureRate,
+      verticalDelay: defaults.verticalDelay,
+      horizontalDelay: defaults.horizontalDelay,
+      routerDelay: defaults.routerDelay,
+      requestProbability: defaults.requestProbability,
+      failureModel: defaults.failureModel,
+      totalCycles: defaults.cycles,
       redundancy: { layout: redundancyLayout, sparesPerLayer: 0, redundancyRatio: 0 },
     };
 
@@ -89,14 +103,16 @@ export const useSimulationStore = defineStore('simulation', () => {
     for (let z = 0; z < numLayers; z++) {
       newGrid[z] = [];
       for (let y = 0; y < gridSize; y++) {
-        newGrid[z][y] = [];
+        newGrid[z]![y] = [];
         for (let x = 0; x < gridSize; x++) {
           let redundant = false;
-          if (redundancyLayout === 'shared' && gridFactor > 1) {
+          if (z < numLayers - 1 && redundancyLayout === 'shared' && gridFactor > 1) {
             const stride = gridFactor - 1;
             redundant = x >= 1 && y >= 1 && (x - 1) % stride === 0 && (y - 1) % stride === 0;
+          } else if (z < numLayers - 1 && redundancyLayout === 'corner4') {
+            redundant = (x % 4 === 0 || x % 4 === 3) && (y % 4 === 0 || y % 4 === 3);
           }
-          newGrid[z][y][x] = { x, y, z, redundant, failed: false, usageCount: 0 };
+          newGrid[z]![y]![x] = { x, y, z, redundant, failed: false, usageCount: 0 };
         }
       }
     }
@@ -105,7 +121,7 @@ export const useSimulationStore = defineStore('simulation', () => {
     for (let z = 0; z < numLayers; z++) {
       trafficGrid[z] = [];
       for (let y = 0; y < gridSize; y++) {
-        trafficGrid[z][y] = new Array(gridSize).fill(0);
+        trafficGrid[z]![y] = new Array(gridSize).fill(0);
       }
     }
 
@@ -155,11 +171,44 @@ export const useSimulationStore = defineStore('simulation', () => {
   }
 
   function setHeatmapUpdateInterval(n: number) {
-    heatmapUpdateInterval.value = Math.max(1, Math.round(n));
+    if (Number.isFinite(n)) heatmapUpdateInterval.value = Math.max(1, Math.round(n));
+  }
+
+  function clearRunData() {
+    error.value = null;
+    stderrLines.value = [];
+    lastCycleTime.value = 0;
+    lastCycleUpdate.value = null;
+    activeRequests.value = new Map();
+    rerouteDisplayPaths.value = new Map();
+    completedCount.value = 0;
+    failedCount.value = 0;
+    currentCycle.value = 0;
+    cycleVersion.value = 0;
+    latencySamples.value = [];
+    throughputTimeline.value = [];
+    failureTimeline.value = [];
+    failureCountTimeline.value = [];
+    powerTimeline.value = [];
+    failureHotspots.value = [];
+    failureProbabilities.value = [];
+    failedTSVPositions.value = [];
+    powerModel.value = null;
+    summary.value = null;
+    recentCompleted.value = [];
+    recentFailed.value = [];
+    stats.value = null;
+  }
+
+  function prepareRun(launch: LaunchConfig) {
+    clearRunData();
+    initializePreview(launch.gridFactor, launch.numLayers, launch.redundancy);
+    totalCycles.value = launch.cycles;
+    simStatus.value = 'running';
   }
 
   function applyInitMessage(msg: InitMessage) {
-    error.value = null;
+    clearRunData();
     lastCycleTime.value = Date.now();
     const { config: msgConfig, grid, hotspotWeights: hsWeights, initialFailures } = msg;
 
@@ -168,9 +217,9 @@ export const useSimulationStore = defineStore('simulation', () => {
     for (let z = 0; z < msgConfig.numLayers; z++) {
       newGrid[z] = [];
       for (let y = 0; y < msgConfig.gridSize; y++) {
-        newGrid[z][y] = [];
+        newGrid[z]![y] = [];
         for (let x = 0; x < msgConfig.gridSize; x++) {
-          newGrid[z][y][x] = { x, y, z, redundant: false, failed: false, usageCount: 0 };
+          newGrid[z]![y]![x] = { x, y, z, redundant: false, failed: false, usageCount: 0 };
         }
       }
     }
@@ -184,14 +233,9 @@ export const useSimulationStore = defineStore('simulation', () => {
     }
 
     // TSV connects layer z to z+1 — propagate failure to upper layer for visualization
-    for (let z = 0; z < msgConfig.numLayers - 1; z++) {
-      for (let y = 0; y < msgConfig.gridSize; y++) {
-        for (let x = 0; x < msgConfig.gridSize; x++) {
-          if (newGrid[z]![y]![x]!.failed) {
-            newGrid[z + 1]![y]![x]!.failed = true;
-          }
-        }
-      }
+    for (const failure of initialFailures) {
+      const cellAbove = newGrid[failure.z + 1]?.[failure.y]?.[failure.x];
+      if (cellAbove) cellAbove.failed = true;
     }
 
     // Track initial failure positions
@@ -202,7 +246,7 @@ export const useSimulationStore = defineStore('simulation', () => {
     for (let z = 0; z < msgConfig.numLayers; z++) {
       trafficGrid[z] = [];
       for (let y = 0; y < msgConfig.gridSize; y++) {
-        trafficGrid[z][y] = new Array(msgConfig.gridSize).fill(0);
+        trafficGrid[z]![y] = new Array(msgConfig.gridSize).fill(0);
       }
     }
     cumulativeTraffic.value = trafficGrid;
@@ -210,22 +254,13 @@ export const useSimulationStore = defineStore('simulation', () => {
     config.value = msgConfig;
     tsvGrid.value = newGrid;
     hotspotWeights.value = hsWeights;
+    failureHotspots.value = msg.failureHotspots ?? msgConfig.failureModel?.centers ?? [];
+    failureProbabilities.value = msg.failureProbabilities ?? [];
+    powerModel.value = msg.powerModel ?? null;
     failedTSVPositions.value = positions;
+    failureCountTimeline.value = [{ cycle: 0, value: positions.length }];
     totalCycles.value = msgConfig.totalCycles;
     simStatus.value = speedMode.value === 'step' ? 'stepping' : 'running';
-    activeRequests.value = new Map();
-    rerouteDisplayPaths.value = new Map();
-    completedCount.value = 0;
-    failedCount.value = 0;
-    currentCycle.value = 0;
-    cycleVersion.value = 0;
-    latencySamples.value = [];
-    throughputTimeline.value = [];
-    failureTimeline.value = [];
-    summary.value = null;
-    recentCompleted.value = [];
-    recentFailed.value = [];
-    stats.value = null;
   }
 
   function applyCycleUpdate(msg: CycleUpdate) {
@@ -318,10 +353,16 @@ export const useSimulationStore = defineStore('simulation', () => {
     latencySamples.value = newSamples.length > 10000 ? newSamples.slice(-10000) : newSamples;
 
     // Throughput timeline
-    throughputTimeline.value = [...throughputTimeline.value, { cycle, value: msgStats.completed }];
+    throughputTimeline.value = appendHistory(throughputTimeline.value, [{ cycle, value: msgStats.completed }]);
 
     // Failure timeline
-    failureTimeline.value = [...failureTimeline.value, ...events.newFailures];
+    failureTimeline.value = appendHistory(failureTimeline.value, events.newFailures);
+    if (events.newFailures.length) {
+      failureCountTimeline.value = appendHistory(failureCountTimeline.value, [{ cycle, value: msgStats.failedTSVs }]);
+    }
+    if (msgStats.power) {
+      powerTimeline.value = appendHistory(powerTimeline.value, [powerSample(msgStats.power, stats.value?.power)]);
+    }
 
     // Failed positions
     failedTSVPositions.value = [...failedTSVPositions.value, ...events.newFailures.map(f => ({ x: f.x, y: f.y, z: f.z }))];
@@ -339,31 +380,18 @@ export const useSimulationStore = defineStore('simulation', () => {
   function applyDoneMessage(msg: DoneMessage) {
     simStatus.value = 'done';
     summary.value = msg.summary;
+    completedCount.value = msg.summary.completed;
+    failedCount.value = msg.summary.failed;
+    if (msg.summary.power && msg.summary.power.elapsedSeconds > (stats.value?.power?.elapsedSeconds ?? 0)) {
+      powerTimeline.value = appendHistory(powerTimeline.value, [powerSample(msg.summary.power, stats.value?.power)]);
+    }
   }
 
   function reset() {
-    wsConnected.value = wsConnected.value; // preserve connection state
+    clearRunData();
     simStatus.value = 'idle';
-    error.value = null;
-    stderrLines.value = [];
-    lastCycleTime.value = 0;
-    cycleVersion.value = 0;
-    lastCycleUpdate.value = null;
     initializePreview();
-    activeRequests.value = new Map();
-    rerouteDisplayPaths.value = new Map();
-    completedCount.value = 0;
-    failedCount.value = 0;
-    recentCompleted.value = [];
-    recentFailed.value = [];
-    currentCycle.value = 0;
     totalCycles.value = 0;
-    stats.value = null;
-    latencySamples.value = [];
-    throughputTimeline.value = [];
-    failureTimeline.value = [];
-    failedTSVPositions.value = [];
-    summary.value = null;
     activeView.value = 'dashboard';
     speedMode.value = 'high';
     colorMode.value = 'type';
@@ -387,6 +415,10 @@ export const useSimulationStore = defineStore('simulation', () => {
     config,
     tsvGrid,
     hotspotWeights,
+    failureHotspots,
+    failureProbabilities,
+    powerModel,
+    power,
     activeRequests,
     rerouteDisplayPaths,
     completedCount,
@@ -399,6 +431,8 @@ export const useSimulationStore = defineStore('simulation', () => {
     latencySamples,
     throughputTimeline,
     failureTimeline,
+    failureCountTimeline,
+    powerTimeline,
     failedTSVPositions,
     summary,
     activeView,
@@ -422,5 +456,6 @@ export const useSimulationStore = defineStore('simulation', () => {
     applyDoneMessage,
     reset,
     initializePreview,
+    prepareRun,
   };
 });

@@ -1,5 +1,6 @@
 import type { Peer } from 'crossws';
-import { SimulationManager, type SimConfig } from '../utils/simulationManager';
+import { SimulationManager } from '../utils/simulationManager';
+import { isRecord, validateLaunchConfig } from '../../shared/simulationConfig';
 
 interface ClientState {
   sim: SimulationManager | null;
@@ -57,14 +58,24 @@ export default defineWebSocketHandler({
     const state = getState(peer);
     let parsed: Record<string, unknown>;
     try {
-      parsed = JSON.parse(message.text());
+      const value: unknown = JSON.parse(message.text());
+      if (!isRecord(value)) {
+        sendErrorToPeer(peer, 'invalid_message', 'Message must be an object.');
+        return;
+      }
+      parsed = value;
     } catch {
-      console.error('Invalid JSON from client:', message.text());
+      sendErrorToPeer(peer, 'invalid_message', 'Message must contain valid JSON.');
       return;
     }
 
     switch (parsed.type) {
       case 'start': {
+        const validation = validateLaunchConfig(parsed.config);
+        if (!validation.ok) {
+          sendErrorToPeer(peer, 'invalid_config', validation.errors.join(' '));
+          return;
+        }
         console.log(`[WS-SRV] <<< start`);
         if (state.sim?.isRunning()) {
           console.log(`[WS-SRV] killing previous sim`);
@@ -76,10 +87,9 @@ export default defineWebSocketHandler({
         state.stopped = false;
 
         const onMessage = (msg: unknown): void => {
-          if (state.stopped) return;
+          if (state.stopped || state.sim !== sim || !isRecord(msg)) return;
 
-          const record = msg as Record<string, unknown>;
-          const msgType = record['type'] as string;
+          const msgType = msg.type;
 
           // init message: always forward immediately
           if (msgType === 'init') {
@@ -97,10 +107,8 @@ export default defineWebSocketHandler({
             return;
           }
 
-          // cycle messages: discard if paused, forward otherwise
-          if (state.paused) return;
-
-          const cycle = (record['cycle'] as number) ?? '?';
+          // A cycle already executed before pause must still update the browser.
+          const cycle = msg.cycle;
           if (typeof cycle === 'number' && (cycle <= 3 || cycle % 1000 === 0)) {
             console.log(`[WS-SRV] onMessage: cycle ${cycle} → forward`);
           }
@@ -108,6 +116,7 @@ export default defineWebSocketHandler({
         };
 
         const onExit = (code: number | null): void => {
+          if (state.sim !== sim) return;
           console.log(`[WS-SRV] onExit: code=${code} stopped=${state.stopped}`);
           state.cppFinished = true;
 
@@ -121,11 +130,13 @@ export default defineWebSocketHandler({
         };
 
         const onError = (err: Error): void => {
+          if (state.sim !== sim) return;
           const code = err.message.includes('not found') ? 'binary_not_found' : 'spawn_failed';
           sendErrorToPeer(peer, code, err.message);
         };
 
         const onStderr = (line: string): void => {
+          if (state.sim !== sim) return;
           try {
             peer.send(JSON.stringify({ type: 'stderr', line }));
           } catch {
@@ -133,8 +144,9 @@ export default defineWebSocketHandler({
           }
         };
 
-        state.sim = new SimulationManager(onMessage, onExit, onError, onStderr);
-        state.sim.start(parsed.config as SimConfig);
+        const sim = new SimulationManager(onMessage, onExit, onError, onStderr);
+        state.sim = sim;
+        sim.start(validation.config);
 
         // Lockstep: always pause C++ immediately so it waits for browser ack
         console.log(`[WS-SRV] start: sending immediate 'p' (lockstep)`);
@@ -143,7 +155,11 @@ export default defineWebSocketHandler({
       }
 
       case 'ack': {
-        const count = (parsed.count as number) || 1;
+        const count = parsed.count ?? 1;
+        if (typeof count !== 'number' || !Number.isInteger(count) || count < 1 || count > 100) {
+          sendErrorToPeer(peer, 'invalid_ack', 'Ack count must be an integer between 1 and 100.');
+          return;
+        }
         if (!state.paused && !state.cppFinished && state.sim) {
           state.sim.sendCommand('n'.repeat(count));
         }
@@ -176,10 +192,9 @@ export default defineWebSocketHandler({
 
       case 'stop': {
         console.log(`[WS-SRV] <<< stop | sim=${!!state.sim} cppFinished=${state.cppFinished}`);
-        state.stopped = true;
+        state.paused = true;
         if (state.sim) {
-          state.sim.kill();
-          state.sim = null;
+          state.sim.stop();
         }
         break;
       }
@@ -193,8 +208,10 @@ export default defineWebSocketHandler({
   close(peer) {
     console.log('WebSocket client disconnected');
     const state = clientStates.get(peer);
-    if (state?.sim?.isRunning()) {
-      state.sim.kill();
+    if (state) {
+      state.stopped = true;
+      state.sim?.kill();
+      state.sim = null;
     }
   },
 

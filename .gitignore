@@ -42,7 +42,13 @@
 
 bin/
 build/
-*.csv
+output/
+*_summary.csv
+*_requests.csv
+*_power.csv
+*_config.json
+__pycache__/
+*.py[cod]
 
 node_modules
 .nuxt
@@ -50,4 +56,3 @@ node_modules
 
 refine-logs/
 experiment-results/
-*.pdf

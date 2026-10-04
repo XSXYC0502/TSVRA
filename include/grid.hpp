@@ -9,6 +9,7 @@
 #include <optional>
 #include <algorithm>
 #include <cmath>
+#include <queue>
 
 namespace tsvra {
 
@@ -21,14 +22,21 @@ struct SpareSite {
 // TSV grid management class
 class Grid {
 public:
+    using ProbabilityMap = std::vector<std::vector<std::vector<double>>>;
     explicit Grid(const Config& config);
 
     // Initialize grid
     void initialize(std::mt19937& rng);
+    void initialize(std::mt19937& initial_rng, std::mt19937& hotspot_rng);
+    void initialize(std::mt19937& initial_rng, std::mt19937& runtime_rng, std::mt19937& hotspot_rng);
 
     // Get TSV
     TSV* get_tsv(int32_t x, int32_t y, int32_t z);
     const TSV* get_tsv(int32_t x, int32_t y, int32_t z) const;
+    // A vertical channel connects z and z+1 and is stored at the lower z.
+    TSV* get_vertical_channel(const Point& from, const Point& to);
+    const TSV* get_vertical_channel(const Point& from, const Point& to) const;
+    bool is_valid_channel(int32_t x, int32_t y, int32_t lower_z) const;
 
     // Check if coordinates are valid
     bool is_valid_position(int32_t x, int32_t y, int32_t z) const;
@@ -45,11 +53,20 @@ public:
     // Failure handling
     void apply_initial_failures(std::mt19937& rng);
     void apply_runtime_failure(std::mt19937& rng);
+    std::vector<Point> apply_runtime_failure(uint64_t current_cycle);
+    double get_failure_probability(int32_t x, int32_t y, int32_t lower_z, bool runtime) const;
+    const ProbabilityMap& get_probability_map(bool runtime) const {
+        return runtime ? runtime_probabilities_ : initial_probabilities_;
+    }
+    const std::vector<Point>& get_hotspot_centers() const { return hotspot_centers_; }
+    size_t get_pending_runtime_failures() const { return runtime_events_.size(); }
 
     // Statistics
     uint32_t count_failed_tsvs() const;
     uint32_t count_failed_redundant_tsvs() const;
-    uint32_t get_total_tsvs() const { return grid_size_ * grid_size_ * num_layers_; }
+    uint64_t get_total_tsvs() const {
+        return static_cast<uint64_t>(grid_size_) * grid_size_ * (num_layers_ - 1);
+    }
     uint32_t get_total_redundant_tsvs() const;
 
     // Getters
@@ -86,10 +103,26 @@ private:
     const Config& config_;
     uint32_t grid_size_;
     uint32_t num_layers_;
-    double failure_rate_;
     RedundancyLayout redundancy_layout_;
     FailureModel failure_model_;
-    ClusterParams cluster_params_;
+    HotspotParams hotspot_params_;
+    ProbabilityMap initial_probabilities_;
+    ProbabilityMap runtime_probabilities_;
+    std::vector<Point> hotspot_centers_;
+    struct FailureEvent {
+        uint64_t cycle;
+        Point channel;
+    };
+    struct LaterFailure {
+        bool operator()(const FailureEvent& a, const FailureEvent& b) const {
+            if (a.cycle != b.cycle) return a.cycle > b.cycle;
+            if (a.channel.z != b.channel.z) return a.channel.z > b.channel.z;
+            if (a.channel.y != b.channel.y) return a.channel.y > b.channel.y;
+            return a.channel.x > b.channel.x;
+        }
+    };
+    std::priority_queue<FailureEvent, std::vector<FailureEvent>, LaterFailure> runtime_events_;
+    uint64_t legacy_runtime_cycle_ = 0;
 
     // 3D TSV grid [z][y][x]
     std::vector<std::vector<std::vector<TSV>>> grid_;
@@ -114,8 +147,9 @@ private:
     // Coverage range search (used by SharedSpare)
     std::optional<Point> select_spare(Point failed_tsv, uint64_t current_time) const;
 
-    // Mean-preserving failure sampler
-    std::vector<Point> sample_failures(std::mt19937& rng, bool runtime);
+    // Maps are normalized over all originally eligible channels and then frozen.
+    void build_probability_maps(std::mt19937& hotspot_rng);
+    void schedule_runtime_failures(std::mt19937& runtime_rng);
 
     // Helper functions
     bool is_redundant_position(int32_t x, int32_t y) const;

@@ -1,0 +1,26 @@
+{
+  "generated_at": "2026-08-13",
+  "seed": 20260813,
+  "row_count": 12000,
+  "split_counts": {
+    "train": 8393,
+    "validation": 1792,
+    "test": 1815
+  },
+  "target": "network_total_power_mW",
+  "label_method": "physics_plus_DSENT_calibration",
+  "fixed_domain": {
+    "process_nm": 45,
+    "vdd_V": 1,
+    "frequency_GHz": 1
+  },
+  "power_range_mW": {
+    "min": 17.83466379,
+    "mean": 1696.3209462561222,
+    "max": 20647.1488837
+  },
+  "sources": [
+    "https://projects.csail.mit.edu/wiki/pub/LSPgroup/PublicationList/dsent_nocs12.pdf",
+    "https://www.gtcad.gatech.edu/www/papers/p25-kim.pdf"
+  ]
+}

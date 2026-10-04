@@ -1,0 +1,14 @@
+Energy>>Router:WriteBuffer = 2.40369e-12 (2.40369e-12 * 1)
+Energy>>Router:ReadBuffer = 2.14529e-12 (2.14529e-12 * 1)
+Energy>>Router:TraverseCrossbar->Multicast1 = 1.23928e-12 (1.23928e-12 * 1)
+Energy>>Router:ArbitrateSwitch->ArbitrateStage1 = 3.41148e-13 (3.41148e-13 * 1)
+Energy>>Router:ArbitrateSwitch->ArbitrateStage2 = 1.95854e-13 (1.95854e-13 * 1)
+Energy>>Router:DistributeClock = 6.08266e-13 (6.08266e-13 * 1)
+NddPower>>Router:Leakage = 0.0158475 (0.0158475 * 1)
+tsvra_event_rate_hz=4.800000e+08
+tsvra_buffer_w=2.183510e-03
+tsvra_crossbar_w=5.948557e-04
+tsvra_control_w=2.577607e-04
+tsvra_clock_w=6.082657e-04
+tsvra_leakage_w=1.584748e-02
+tsvra_total_w=1.949187e-02

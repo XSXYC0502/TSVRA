@@ -4,6 +4,7 @@
 #include "request.hpp"
 #include "config.hpp"
 #include "grid.hpp"
+#include "power_model.hpp"
 #include <vector>
 #include <string>
 #include <cstdint>
@@ -23,11 +24,6 @@ public:
     // Record TSV usage
     void record_redundant_tsv_usage();
 
-    // Record bypass diagnostics
-    void record_failed_vertical_encounter();
-    void record_spare_found();
-    void record_spare_unavailable();
-
     // Directly set bypass diagnostic counters (used when bulk-copying from Grid)
     void set_failed_vertical_encounters(uint64_t v) { failed_vertical_encounters_ = v; }
     void set_spare_found(uint64_t v) { spare_found_ = v; }
@@ -35,9 +31,19 @@ public:
 
     // Record in-flight requests (at simulation end)
     void record_in_flight(uint64_t count);
+    void record_in_flight_at_horizon(uint64_t count) { in_flight_at_horizon_ = count; }
+    uint64_t get_in_flight_at_horizon() const { return in_flight_at_horizon_; }
 
     // Update failure statistics
     void update_failure_stats(const Grid& grid);
+    void update_power(const PowerSnapshot& power, uint32_t actual_seed, double interval_mw) {
+        power_ = power;
+        actual_seed_ = actual_seed;
+        interval_total_mw_ = interval_mw;
+    }
+    const PowerSnapshot& get_power() const { return power_; }
+    uint32_t get_actual_seed() const { return actual_seed_; }
+    double get_interval_total_mw() const { return interval_total_mw_; }
     
     // Output statistics
     void print_summary() const;
@@ -65,8 +71,6 @@ public:
     const std::vector<Request>& get_failed_requests_list() const { return failed_requests_list_; }
 
 private:
-    const Config& config_;
-    
     // Request statistics
     uint64_t total_requests_;
     uint64_t completed_requests_;
@@ -76,7 +80,6 @@ private:
     uint64_t total_latency_;
     uint64_t max_latency_;
     uint64_t min_latency_;
-    std::vector<uint64_t> latency_samples_;
     uint64_t total_horizontal_distance_;
     
     // TSV statistics
@@ -85,8 +88,12 @@ private:
     uint64_t spare_found_;
     uint64_t spare_unavailable_;
     uint64_t in_flight_;
+    uint64_t in_flight_at_horizon_ = 0;
     uint32_t current_failed_tsvs_;
     uint32_t current_failed_redundant_tsvs_;
+    PowerSnapshot power_{};
+    uint32_t actual_seed_ = 0;
+    double interval_total_mw_ = 0.0;
     
     // Request records (for export)
     std::vector<Request> completed_requests_list_;

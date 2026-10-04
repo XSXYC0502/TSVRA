@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "nuxt dev",
     "build": "nuxt build",
-    "preview": "nuxt preview"
+    "preview": "nuxt preview",
+    "test": "node tests/simulation.test.mjs",
+    "test:integration": "node tests/websocket.integration.mjs"
   },
   "dependencies": {
     "@pinia/nuxt": "^0.11.3",

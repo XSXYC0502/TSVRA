@@ -32,7 +32,6 @@ function(tsvra_apply_compile_options target_name)
             -Wdouble-promotion
             -Wsign-conversion
             -Woverloaded-virtual
-            -fpermissive
         )
     elseif (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
         target_compile_options(${target_name} PRIVATE
@@ -70,6 +69,7 @@ set(LIB_SOURCES
     src/request_generator.cpp
     src/simulator.cpp
     src/statistics.cpp
+    src/power_model.cpp
 )
 
 # Link pthread because the standard library requires it, even without direct multithreading.
@@ -86,13 +86,6 @@ add_executable(tsvra src/main.cpp)
 target_link_libraries(tsvra PRIVATE tsvra_lib Threads::Threads)
 tsvra_apply_compile_options(tsvra)
 
-# Enable -Werror for our own code.
-# Note: GCC 16.0.0 has a known pthread-related compile issue in the standard library
-# (ext/concurrence.h and bits/std_mutex.h).
-# This is a standard-library bug, not a project bug, so -Werror remains disabled for now.
-# Uncomment it again after the standard library is fixed.
-# target_compile_options(tsvra PRIVATE -Werror)
-
 tsvra_set_runtime_output(tsvra)
 
 # Tests
@@ -102,3 +95,20 @@ target_link_libraries(tsvra_tests PRIVATE tsvra_lib Threads::Threads)
 tsvra_apply_compile_options(tsvra_tests)
 tsvra_set_runtime_output(tsvra_tests)
 add_test(NAME tsvra_tests COMMAND $<TARGET_FILE:tsvra_tests>)
+set_tests_properties(tsvra_tests PROPERTIES WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+
+foreach(suite failure power)
+    add_executable(tsvra_${suite}_tests tests/${suite}_tests.cpp)
+    target_link_libraries(tsvra_${suite}_tests PRIVATE tsvra_lib Threads::Threads)
+    tsvra_apply_compile_options(tsvra_${suite}_tests)
+    tsvra_set_runtime_output(tsvra_${suite}_tests)
+    add_test(NAME tsvra_${suite}_tests COMMAND $<TARGET_FILE:tsvra_${suite}_tests>)
+    set_tests_properties(tsvra_${suite}_tests PROPERTIES WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+endforeach()
+
+find_package(Python3 COMPONENTS Interpreter QUIET)
+if(Python3_Interpreter_FOUND)
+    add_test(NAME tsvra_integration COMMAND ${Python3_EXECUTABLE}
+        ${PROJECT_SOURCE_DIR}/tests/integration_tests.py $<TARGET_FILE:tsvra>)
+    set_tests_properties(tsvra_integration PROPERTIES WORKING_DIRECTORY ${PROJECT_SOURCE_DIR} TIMEOUT 120)
+endif()

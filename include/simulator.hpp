@@ -6,11 +6,13 @@
 #include "router.hpp"
 #include "request_generator.hpp"
 #include "statistics.hpp"
+#include "power_model.hpp"
 #include <random>
 #include <queue>
 #include <memory>
 #include <string>
 #include <sstream>
+#include <fstream>
 
 namespace tsvra {
 
@@ -59,16 +61,27 @@ public:
 
     // Get statistics
     const Statistics& get_statistics() const { return stats_; }
+    uint32_t get_actual_seed() const { return actual_seed_; }
+    void export_configuration(const std::string& filename) const;
 
 private:
     const Config& config_;
-    std::mt19937 rng_;
+    uint32_t actual_seed_;
+    std::mt19937 traffic_rng_;
+    std::mt19937 initial_failure_rng_;
+    std::mt19937 runtime_failure_rng_;
+    std::mt19937 failure_hotspot_rng_;
 
     // Core components
     std::unique_ptr<Grid> grid_;
     std::unique_ptr<Router> router_;
     std::unique_ptr<RequestGenerator> req_gen_;
     Statistics stats_;
+    std::unique_ptr<PowerModel> power_;
+    PowerSnapshot window_start_{};
+    double interval_total_mw_ = 0.0;
+    uint64_t in_flight_at_horizon_ = 0;
+    std::ofstream power_trace_;
 
     // Pending request queue
     std::queue<Request> pending_requests_;
@@ -93,14 +106,17 @@ private:
     std::vector<JsonReroute> cycle_reroutes_;
 
     // Simulation steps
-    void simulate_cycle();
+    void simulate_cycle(bool generate_requests);
     void generate_new_requests();
     void handle_runtime_failures();
     void process_pending_requests();
     void update_transmitting_requests();
     bool route_request(Request& req);
     bool reroute_request(Request& req);
-    void update_tsv_occupancy(const std::vector<Point>& path, uint64_t complete_time);
+    void record_launched_hop(Request& req);
+    void reserve_next_hop(Request& req, TSV* resource);
+    void update_power_statistics();
+    void write_power_trace();
     void increment_path_usage(const std::vector<Point>& path);
     void decrement_path_usage(const std::vector<Point>& path);
 
@@ -111,6 +127,7 @@ private:
     void emit_init_json();
     void emit_cycle_json();
     void emit_done_json();
+    std::string power_to_json() const;
     void poll_stdin_commands();
     void reset_cycle_accumulators();
     static std::string point_to_json(const Point& p);

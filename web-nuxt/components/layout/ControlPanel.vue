@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { storeToRefs } from 'pinia';
+import { formatEnergy, formatPower, formatSimulationTime } from '~/utils/formatters';
 import { useSimulationStore } from '~/stores/simulation';
 import { useWebSocket } from '~/composables/useWebSocket';
 import SimConfigForm from '~/components/config/SimConfigForm.vue';
 import type { SpeedMode } from '~/types/simulation';
 
 const store = useSimulationStore();
-const { simStatus, speedMode, stats, summary } = storeToRefs(store);
+const { simStatus, speedMode, stats, summary, power } = storeToRefs(store);
 const ws = useWebSocket();
 
 const speedOptions: { key: SpeedMode; label: string }[] = [
@@ -23,7 +24,7 @@ const speedOptions: { key: SpeedMode; label: string }[] = [
     <SimConfigForm v-if="simStatus === 'idle' || simStatus === 'configuring'" />
 
     <!-- Speed control — visible before and during simulation -->
-    <div v-if="simStatus !== 'configuring' && simStatus !== 'done'">
+    <div v-if="simStatus !== 'configuring' && simStatus !== 'done' && simStatus !== 'stopping'">
       <label class="text-xs text-gray-400 mb-1 block">Speed</label>
       <div class="flex gap-1">
         <button
@@ -58,7 +59,7 @@ const speedOptions: { key: SpeedMode; label: string }[] = [
           Resume
         </button>
         <button
-          v-if="simStatus !== 'done'"
+          v-if="simStatus !== 'done' && simStatus !== 'stopping'"
           class="px-3 py-1.5 bg-red-600 hover:bg-red-700 rounded text-sm font-medium"
           @click="ws.stop()"
         >
@@ -79,6 +80,7 @@ const speedOptions: { key: SpeedMode; label: string }[] = [
           Reset
         </button>
       </div>
+      <p v-if="simStatus === 'stopping'" class="text-xs text-gray-400">Finishing the current cycle…</p>
 
       <!-- Heatmap update interval -->
       <div v-if="simStatus !== 'done'">
@@ -90,6 +92,16 @@ const speedOptions: { key: SpeedMode; label: string }[] = [
           class="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm focus:border-blue-500 focus:outline-none"
           @input="(e: Event) => { store.setHeatmapUpdateInterval(Number((e.target as HTMLInputElement).value)) }"
         />
+      </div>
+
+      <div v-if="power" class="space-y-1 text-sm">
+        <h3 class="font-medium text-cyan-400">Power and Energy</h3>
+        <div class="grid grid-cols-2 gap-1 text-xs">
+          <span class="text-gray-500">Avg Total:</span><span>{{ formatPower(power.totalMw) }}</span>
+          <span class="text-gray-500">Energy:</span><span>{{ formatEnergy(power.totalEnergyPj) }}</span>
+          <span class="text-gray-500">Per Flit:</span><span>{{ formatEnergy(power.energyPerCompletedFlitPj) }}</span>
+          <span class="text-gray-500">Sim Time:</span><span>{{ formatSimulationTime(power.elapsedSeconds) }}</span>
+        </div>
       </div>
 
       <!-- Running stats -->

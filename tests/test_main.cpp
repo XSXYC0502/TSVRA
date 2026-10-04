@@ -188,6 +188,9 @@ bool test_config_defaults() {
     ASSERT_GT(cfg.get_simulation_cycles(), 0u);
     ASSERT_GT(cfg.get_vertical_delay(), 0u);
     ASSERT_GT(cfg.get_horizontal_delay(), 0u);
+    ASSERT_EQ(cfg.get_vertical_delay(), 5u);
+    ASSERT_EQ(cfg.get_horizontal_delay(), 500u);
+    ASSERT_EQ(cfg.get_router_delay(), 15u);
     return true;
 }
 
@@ -229,7 +232,7 @@ bool test_grid_dimensions() {
     grid.initialize(rng);
     ASSERT_EQ(grid.get_grid_size(), 8u);
     ASSERT_EQ(grid.get_num_layers(), 3u);
-    ASSERT_EQ(grid.get_total_tsvs(), 8u * 8u * 3u);
+    ASSERT_EQ(grid.get_total_tsvs(), 8u * 8u * 2u); // Only layer interfaces carry TSV channels.
     return true;
 }
 
@@ -287,8 +290,8 @@ bool test_grid_redundant_tsv_count_shared_spare() {
     std::mt19937 rng(1);
     tsvra::Grid grid(cfg);
     grid.initialize(rng);
-    // 25 spares per layer * 2 layers = 50
-    ASSERT_EQ(grid.get_total_redundant_tsvs(), 50u);
+    // 25 spare channels on the one interface between two layers.
+    ASSERT_EQ(grid.get_total_redundant_tsvs(), 25u);
     return true;
 }
 
@@ -399,14 +402,14 @@ bool test_router_delay_calculation() {
     tsvra::Grid grid(cfg);
     grid.initialize(rng);
     tsvra::Router router(grid, cfg);
-    // Pure vertical path: (0,0,0)->(0,0,1) costs vertical_delay
+    // Link delays retain their original values; every hop adds router delay.
     std::vector<tsvra::Point> path = {{0,0,0},{0,0,1}};
     uint64_t delay = router.calculate_path_delay(path);
-    ASSERT_EQ(delay, 5u);
+    ASSERT_EQ(delay, 20u);
     // Pure horizontal: (0,0,0)->(1,0,0) costs horizontal_delay
     std::vector<tsvra::Point> hpath = {{0,0,0},{1,0,0}};
     uint64_t hdelay = router.calculate_path_delay(hpath);
-    ASSERT_EQ(hdelay, 500u);
+    ASSERT_EQ(hdelay, 515u);
     return true;
 }
 
@@ -855,7 +858,6 @@ int main() {
               << " passed, " << tests_failed << " failed ===\n";
     return tests_failed > 0 ? 1 : 0;
 }
-
 
 
 

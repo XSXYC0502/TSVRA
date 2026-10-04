@@ -1,6 +1,6 @@
 import { ref } from 'vue';
 import { useSimulationStore } from '~/stores/simulation';
-import type { SpeedMode } from '~/types/simulation';
+import type { LaunchConfig, SpeedMode } from '~/types/simulation';
 
 let ws: WebSocket | null = null;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -109,12 +109,10 @@ export function connect(): void {
           break;
 
         case 'cycle':
-          if (store.simStatus === 'paused') break;
-
           store.applyCycleUpdate(msg);
 
           // Lockstep: ack after processing a batch
-          if (store.speedMode !== 'step') {
+          if (store.speedMode !== 'step' && store.simStatus === 'running') {
             cyclesSinceAck++;
             const batch = ACK_BATCH[store.speedMode];
             if (cyclesSinceAck >= batch) {
@@ -125,6 +123,7 @@ export function connect(): void {
           break;
 
         case 'done':
+          if (ackTimer) { clearTimeout(ackTimer); ackTimer = null; }
           store.applyDoneMessage(msg);
           break;
 
@@ -159,19 +158,9 @@ export function disconnect(): void {
   ws = null;
 }
 
-export function start(config: {
-  numLayers: number;
-  gridFactor: number;
-  failureMode: 'a' | 'b' | 'c';
-  failureRate: number;
-  verticalDelay: number;
-  horizontalDelay: number;
-  cycles: number;
-  seed?: number;
-}): void {
+export function start(config: LaunchConfig): void {
   const store = useSimulationStore();
-  store.clearError();
-  store.setSimStatus('running');
+  store.prepareRun(config);
   cyclesSinceAck = 0;
   if (ackTimer) { clearTimeout(ackTimer); ackTimer = null; }
   send({ type: 'start', config });
@@ -188,7 +177,7 @@ export function pause(): void {
 export function resume(): void {
   send({ type: 'resume' });
   const store = useSimulationStore();
-  store.setSimStatus('running');
+  store.setSimStatus(store.speedMode === 'step' ? 'stepping' : 'running');
   cyclesSinceAck = 0;
   if (ackTimer) { clearTimeout(ackTimer); ackTimer = null; }
   // Kick-start with current batch size
@@ -199,12 +188,13 @@ export function resume(): void {
 
 export function stop(): void {
   send({ type: 'stop' });
-  useSimulationStore().setSimStatus('idle');
+  useSimulationStore().setSimStatus('stopping');
   cyclesSinceAck = 0;
   if (ackTimer) { clearTimeout(ackTimer); ackTimer = null; }
 }
 
 export function step(): void {
+  if (useSimulationStore().simStatus === 'paused') send({ type: 'resume' });
   // In lockstep, step = send one ack credit
   sendAck(1);
   useSimulationStore().setSimStatus('stepping');
@@ -225,6 +215,8 @@ export function setSpeed(mode: SpeedMode): void {
     if (mode !== 'step') {
       store.setSimStatus('running');
       sendAck(ACK_BATCH[mode]);       // kick-start with new batch size
+    } else {
+      store.setSimStatus('stepping');
     }
   }
 }

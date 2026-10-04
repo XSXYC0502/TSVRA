@@ -1,0 +1,39 @@
+{
+  "binary": "bin/tsvra",
+  "output_dir": "output/example",
+  "jobs": 4,
+  "repetitions": 2,
+  "seeds": [42, 43],
+  "timeout_seconds": null,
+  "defaults": {
+    "grid_factor": 4,
+    "simulation_cycles": 5000,
+    "failure_mode": "a",
+    "redundancy": "shared",
+    "vertical_delay": 5,
+    "horizontal_delay": 500,
+    "router_delay": 15,
+    "request_probability": 0.01,
+    "max_horizontal_distance": 25,
+    "power_config": "power_model.ini",
+    "lambda1": 0.0,
+    "lambda2": 0.0
+  },
+  "configurations": [
+    {
+      "name": "shared_uniform",
+      "parameters": {"failure_model": "uniform"},
+      "matrix": {"num_layers": [2, 4], "failure_rate": [0.05, 0.3]}
+    },
+    {
+      "name": "shared_hotspot",
+      "parameters": {
+        "failure_model": "hotspot",
+        "hotspot_count": 2,
+        "hotspot_radius": 3.0,
+        "hotspot_multiplier": 6.0
+      },
+      "matrix": {"num_layers": [2, 4], "failure_rate": [0.05, 0.3]}
+    }
+  ]
+}

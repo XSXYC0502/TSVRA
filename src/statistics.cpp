@@ -4,12 +4,12 @@
 #include <iomanip>
 #include <algorithm>
 #include <limits>
+#include <stdexcept>
 
 namespace tsvra {
 
-Statistics::Statistics(const Config& config)
-    : config_(config),
-      total_requests_(0),
+Statistics::Statistics(const Config&)
+    : total_requests_(0),
       completed_requests_(0),
       failed_requests_(0),
       total_latency_(0),
@@ -38,7 +38,6 @@ void Statistics::record_request_completed(const Request& req) {
     max_latency_ = std::max(max_latency_, latency);
     min_latency_ = std::min(min_latency_, latency);
     
-    latency_samples_.push_back(latency);
     completed_requests_list_.push_back(req);
 }
 
@@ -50,18 +49,6 @@ void Statistics::record_request_failed(const Request& req) {
 
 void Statistics::record_redundant_tsv_usage() {
     ++redundant_tsv_usages_;
-}
-
-void Statistics::record_failed_vertical_encounter() {
-    ++failed_vertical_encounters_;
-}
-
-void Statistics::record_spare_found() {
-    ++spare_found_;
-}
-
-void Statistics::record_spare_unavailable() {
-    ++spare_unavailable_;
 }
 
 void Statistics::record_in_flight(uint64_t count) {
@@ -118,6 +105,10 @@ void Statistics::print_summary() const {
     std::cout << "  Failed TSVs:            " << current_failed_tsvs_ << "\n";
     std::cout << "  Failed redundant TSVs:  " << current_failed_redundant_tsvs_ << "\n";
     std::cout << "  Redundant TSV usages:   " << redundant_tsv_usages_ << "\n";
+    std::cout << "  Actual seed:            " << actual_seed_ << "\n";
+    std::cout << "  Simulated cycles:       " << power_.elapsed_cycles << "\n";
+    std::cout << "  Average power (mW):     " << power_.total_mw << "\n";
+    std::cout << "  Total energy (pJ):      " << power_.total_energy_pj << "\n";
     
     std::cout << "\n=================================\n\n";
 }
@@ -125,11 +116,10 @@ void Statistics::print_summary() const {
 void Statistics::export_to_csv(const std::string& filename) const {
     std::ofstream file(filename);
     if (!file.is_open()) {
-        std::cerr << "Failed to create file: " << filename << std::endl;
-        return;
+        throw std::runtime_error("Cannot create statistics file: " + filename);
     }
 
-    file << "Metric,Value\n";
+    file << std::setprecision(17) << "Metric,Value\n";
     file << "Total Requests," << total_requests_ << "\n";
     file << "Completed Requests," << completed_requests_ << "\n";
     file << "Failed Requests," << failed_requests_ << "\n";
@@ -153,7 +143,29 @@ void Statistics::export_to_csv(const std::string& filename) const {
     file << "Failed Vertical Encounters," << failed_vertical_encounters_ << "\n";
     file << "Spare Found," << spare_found_ << "\n";
     file << "Spare Unavailable," << spare_unavailable_ << "\n";
-    file << "In Flight At Horizon," << in_flight_ << "\n";
+    file << "In Flight At Horizon," << in_flight_at_horizon_ << "\n";
+    file << "In Flight At End," << in_flight_ << "\n";
+    file << "Actual Seed," << actual_seed_ << "\n";
+    file << "Router Count," << power_.router_count << "\n";
+    file << "Elapsed Cycles," << power_.elapsed_cycles << "\n";
+    file << "Elapsed Seconds," << power_.elapsed_seconds << "\n";
+    file << "Router Events," << power_.router_events << "\n";
+    file << "Horizontal Hops," << power_.horizontal_hops << "\n";
+    file << "Vertical Hops," << power_.vertical_hops << "\n";
+    file << "Redundant Vertical Hops," << power_.redundant_vertical_hops << "\n";
+    file << "Router Static Power (mW)," << power_.router_static_mw << "\n";
+    file << "Router Dynamic Power (mW)," << power_.router_dynamic_mw << "\n";
+    file << "Horizontal Power (mW)," << power_.horizontal_mw << "\n";
+    file << "Vertical Power (mW)," << power_.vertical_mw << "\n";
+    file << "Total Power (mW)," << power_.total_mw << "\n";
+    file << "Interval Power (mW)," << interval_total_mw_ << "\n";
+    file << "Total Energy (pJ)," << power_.total_energy_pj << "\n";
+    file << "Router Energy (pJ)," << power_.router_energy_pj << "\n";
+    file << "Horizontal Energy (pJ)," << power_.horizontal_energy_pj << "\n";
+    file << "Vertical Energy (pJ)," << power_.vertical_energy_pj << "\n";
+    file << "Energy Per Completed Flit (pJ),";
+    if (completed_requests_ != 0) file << power_.total_energy_pj / static_cast<double>(completed_requests_);
+    file << "\n";
 
     // Calculate terminal delivery rate (excluding in-flight requests)
     uint64_t terminal_total = completed_requests_ + failed_requests_;
@@ -174,8 +186,7 @@ void Statistics::export_to_csv(const std::string& filename) const {
 void Statistics::export_requests_to_csv(const std::string& filename) const {
     std::ofstream file(filename);
     if (!file.is_open()) {
-        std::cerr << "Failed to create file: " << filename << std::endl;
-        return;
+        throw std::runtime_error("Cannot create request file: " + filename);
     }
 
     file << "Request ID,Start X,Start Y,Start Z,End X,End Y,End Z,"

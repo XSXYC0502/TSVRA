@@ -43,10 +43,8 @@ void RequestGenerator::build_cumulative_distribution() {
 }
 
 std::optional<Request> RequestGenerator::generate_request(uint64_t current_time) {
-    // Generate request with a certain probability
-    // On average, generate 1 request every 2 cycles
-    double request_probability = 0.5;
-    if (uniform_dist_(rng_) > request_probability) {
+    // This is one global Bernoulli trial per cycle, not a per-router rate.
+    if (uniform_dist_(rng_) >= config_.get_request_probability()) {
         return std::nullopt;
     }
     

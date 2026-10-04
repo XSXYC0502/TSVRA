@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "source_url": "https://github.com/mit-carbon/Graphite/tree/1b4bb98f5bfb96ca394b71e7ef3e9e500a1e3997/contrib/dsent/dsent-core",
+  "source_revision": "1b4bb98f5bfb96ca394b71e7ef3e9e500a1e3997",
+  "source_version": "DSENT 0.9 (22 May 2012)",
+  "technology": "Bulk45LVT",
+  "technology_sha256": "2b68de2978ad262b31e3cc0d88361a55d3ee143a88d3318ae6752f7eeabd7f6f",
+  "configuration_sha256": "269c7ec5a93fff1028a9827902112c83e88e1b19730a72f6ed71d829f4448d8a",
+  "frequency_hz": 1000000000.0,
+  "voltage_v": 1.0,
+  "temperature_k": 340,
+  "router_ports": 6,
+  "flit_bits": 64,
+  "virtual_channels_per_port": 8,
+  "buffers_per_virtual_channel": 2,
+  "clock_tree_levels": 5,
+  "timing_optimization": true,
+  "samples": [
+    {
+      "file": "sample_00.txt",
+      "injection_rate_per_port": 0.0,
+      "sha256": "a8215a5739164308f4f85ff1ab25d828a43e814fe70da34430fc2f024130f26b"
+    },
+    {
+      "file": "sample_01.txt",
+      "injection_rate_per_port": 0.08,
+      "sha256": "b542eeb306063f37491effd569c95d956d8205dd503bb105f635fda08229bf45"
+    },
+    {
+      "file": "sample_02.txt",
+      "injection_rate_per_port": 0.16,
+      "sha256": "ff0c7b4feb9aab0e5680c45f4681cee2b3fea6ce9ec650b06bd467ff6938f0b0"
+    },
+    {
+      "file": "sample_03.txt",
+      "injection_rate_per_port": 0.32,
+      "sha256": "acc0f00a3a2dd81519c11758db517599e4100c526d598884ed06c6dbf3800edd"
+    }
+  ]
+}

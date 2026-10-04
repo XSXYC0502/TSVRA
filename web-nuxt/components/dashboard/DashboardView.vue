@@ -3,6 +3,7 @@ import { computed } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useSimulationStore } from '~/stores/simulation';
 import { formatNumber, formatPercent, formatLatency } from '~/utils/formatters';
+import PowerPanel from './PowerPanel.vue';
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -61,7 +62,7 @@ const latencyChartData = computed(() => {
   }));
   for (const s of samples) {
     const idx = Math.min(Math.floor((s - min) / binSize), numBins - 1);
-    bins[idx].count++;
+    bins[idx]!.count++;
   }
 
   return {
@@ -175,7 +176,7 @@ const pieChartOptions = {
     </div>
 
     <!-- KPI Cards -->
-    <div class="grid grid-cols-4 gap-4">
+    <div class="grid grid-cols-2 xl:grid-cols-4 gap-4">
       <div class="bg-gray-800/50 rounded-lg p-4 border border-gray-700/50">
         <p class="text-xs text-gray-400 mb-1">Resolved Requests</p>
         <p class="text-2xl font-bold text-blue-400">{{ formatNumber(resolved) }}</p>
@@ -200,6 +201,8 @@ const pieChartOptions = {
         <p v-if="stats" class="text-xs text-gray-500 mt-1">{{ stats.redundantUsages }} redundant usages</p>
       </div>
     </div>
+
+    <PowerPanel />
 
     <!-- Charts Row 1 -->
     <div class="grid grid-cols-2 gap-4">

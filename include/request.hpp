@@ -2,6 +2,7 @@
 #define TSVRA_REQUEST_HPP
 
 #include <cstdint>
+#include <cstddef>
 #include <vector>
 
 namespace tsvra {
@@ -43,8 +44,11 @@ struct Request {
     bool completed;             // Whether completed
     std::vector<Point> path;    // Path (computed by routing algorithm)
     RequestStatus status;       // Request status
-    size_t current_hop;         // Current hop index along the path
-    uint64_t next_hop_time;     // Time of next hop
+    size_t current_hop;         // Index of the last reached vertex
+    uint64_t next_hop_time;     // Arrival cycle of the reserved next hop
+    uint64_t hop_start_time = 0;
+    bool hop_reserved = false;
+    bool hop_launched = false;  // Energy is charged once, at the actual start
     
     Request() 
         : id(0), start(), end(), generate_time(0), 
@@ -64,7 +68,7 @@ struct Request {
         return horizontal_distance;
     }
     
-    // Get current position
+    // A waiting/in-flight request remains at its last reached vertex.
     Point get_current_position() const {
         if (path.empty() || current_hop >= path.size()) {
             return start;

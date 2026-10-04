@@ -1,232 +1,97 @@
-# TSVRA - TSV Routing Algorithm Simulator
+# TSVRA
 
-## Overview
+C++20 simulator for TSV routing, redundancy and spatial failures in a multilayer chip, with Nuxt visualization and an explicit architecture power estimate.
 
-TSVRA (TSV Routing Algorithm) is a 3D chip TSV (Through-Silicon Via) routing simulation system. It models TSV transmission, failure handling, and redundant routing mechanisms in a multi-layer chip structure.
+## Build and run
 
-## Key Features
-
-- **Multi-layer TSV grid model**: Supports configurable multi-layer TSV grids (default: 2 layers)
-- **Redundant TSV mechanism**: The four corners of each 4x4 region are treated as redundant TSVs
-- **Three failure modes**:
-  - Mode a: initial failures only
-  - Mode b: runtime dynamic failures only
-  - Mode c: mixed failures (initial + runtime)
-- **A* routing algorithm**: Supports an extensible heuristic interface
-- **Hotspot simulation**: Weighted request generation to model realistic access patterns
-- **Detailed statistics output**: Command-line summaries plus CSV export
-
-## Requirements
-
-- C++20兼容编译器（GCC 10+, Clang 11+, 或 Visual Studio 2022 / MSVC）
-- CMake 3.20+
-
-## Build
+Run from the repository root:
 
 ```bash
-# 配置
-cmake -S . -B build
-
-# 编译（Linux / macOS / Windows 通用）
-cmake --build build --config Release
-
-# Executables will be generated under bin/
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build --parallel
+ctest --test-dir build --output-on-failure
+./bin/tsvra --cycles 1000 --seed 42 --output output/demo
 ```
 
-## Usage
-Windows + MSVC:
-
-```powershell
-cmake --preset windows-msvc
-cmake --build --preset windows-msvc-release
-ctest --preset windows-msvc-release
-```
-
-If you prefer not to use presets, the equivalent configure command is:
-
-```powershell
-cmake -S . -B build/windows-msvc -G "Visual Studio 17 2022" -A x64
-```
-
-If CMake reports `No CMAKE_CXX_COMPILER could be found` at `CMakeLists.txt:3`, that means MSVC was not discoverable from the current shell. Using the preset above avoids relying on an already-initialized compiler environment.
-
-## 使用方法
-
-### Basic Usage
+Windows: [run guide](HOW_TO_RUN_PROJECT_UNDER_WINDOWS.md). `./bin/tsvra --help` lists options; `--print-defaults` prints native defaults.
 
 ```bash
-./bin/tsvra
+cd web-nuxt
+npm ci
+npm run dev
 ```
 
-### Using a Config File
+Open Nuxt's printed address. Build C++ first. The webpage has pause/step/speed controls, dashboard, 3D grid, traffic heatmap and failure view.
 
-### Command-Line Arguments
-Windows PowerShell / CMD:
+From `web-nuxt`, `npm test` checks launch validation and state accounting, `npm run build` checks the production build, and `npm run test:integration` exercises the real WebSocket/native process link.
 
-```powershell
-.\bin\tsvra.exe --config config.ini
-```
+## Timing and traffic
 
-### 命令行参数
+Link delays retain their original settings. Every actual hop adds **15 router cycles**, configurable with `--router-delay`.
+
+| Setting | Native defaults | `config.ini` / web link defaults |
+|---|---:|---:|
+| Vertical link | 5 | 1 |
+| Horizontal link | 500 | 1000 |
+| Router per hop | 15 | 15 |
+
+Native vertical/horizontal hops take 20/515 cycles before contention. `--config config.ini` selects the existing example profile; CLI arguments override file settings. Link delays are architectural costs retained at the user's request, not measured 45 nm timings. The power file maps one cycle to 1 ns by default. Playback speed does not change this time.
+
+The original scheduler dispatches a newly routed or rerouted flit on the next cycle. That one-cycle dispatch time is retained and included in route arrival/risk estimates; subsequent hops start on the previous hop's arrival cycle.
+
+One Request is one **64 bit flit**. A packet may contain several flits; packet segmentation is outside this model. Traffic uses one global Bernoulli trial per cycle (`--request-probability`, default 0.5) and spatial weights independent of failure hotspots.
+
+## Failures and routing
+
+`--failure-model uniform` gives spatially uniform independent probabilities. `--failure-model hotspot` gives fixed Gaussian high-risk regions, seeded or manually located:
 
 ```bash
-./bin/tsvra [options]
-
-Options:
-  --config <file>           Load configuration from a file
-  --layers <n>              Number of layers (default: 2)
-  --grid-factor <n>         Grid factor (default: 4, grid size = 4*n)
-  --failure-mode <a|b|c>    Failure mode (default: a)
-  --failure-rate <rate>     Failure rate (default: 1e-6)
-  --vertical-delay <n>      Vertical delay (default: 1)
-  --horizontal-delay <n>    Horizontal delay (default: 1000)
-  --max-horizontal-distance <n> Max horizontal hops H_max (default: 0 = unlimited)
-  --output <prefix>         Output file prefix (default: tsvra_output)
-  --seed <n>                Random seed (default: 0 = random)
-  -h, --help                Show help
+./bin/tsvra --cycles 1000 --seed 42 --failure-mode c \
+  --initial-failure-rate 0.05 --runtime-failure-rate 1e-6 \
+  --failure-model hotspot --hotspot-radius 3 --hotspot-multiplier 5 \
+  --hotspot-centers '5,5,0;10,10,1' --output output/hotspot
 ```
 
-### Examples
+Timing is separate from distribution: `a` initial only, `b` runtime only, `c` both. Initial probability is a defect probability; runtime probability is conditional failure probability **per cycle** for a surviving channel. `--failure-rate` is the compatibility option for both. The old `clustered` name aliases `hotspot`.
+
+Each vertical edge z↔z+1 uses one logical 64 bit TSV channel stored at **lower z**. The top layer has routing nodes, no additional vertical channels. Channel probabilities are not individual physical-via probabilities.
+
+Hotspot probabilities are normalized over the original channels to preserve the configured mean, clipped to [0,1], and frozen throughout a run. Runtime failures use geometric lifetimes. Traffic, hotspot locations, initial faults and runtime faults have separate RNG streams. Exports record the actual seed, including when `--seed 0` requests a random seed.
+
+A* supports congestion/risk weights, path and horizontal-distance limits, and a reliability threshold. `--redundancy shared|corner4|none` selects spares. Path penalties affect selection; physical arrival time contains link/router delays and resource waits. Requests drain after the generation horizon, with runtime failures still active.
+
+See [failure equations and limitations](docs/failure-model.md) for normalization, lifetime sampling and routing risk.
+
+## Power and outputs
+
+[power_model.ini](power_model.ini) contains editable, versioned 45 nm reference coefficients. The model sums continuous router idle energy and **actually launched** router/link events; no training is required. See [equations and calibration](docs/power-model.md) for sources and applicability.
+
+| File suffix | Contents |
+|---|---|
+| `_summary.csv` | Delivery, latency, failures, hop counts, mean power and energy |
+| `_requests.csv` | Terminal requests and coordinates/times/status |
+| `_power.csv` | Power/energy every 100 cycles and at completion |
+| `_config.json` | Settings, actual seed and exact power parameters |
+
+Energy includes failed requests' launched hops, in-flight work and drain time. Energy per completed flit is empty/JSON null when none completes. Router idle energy remains with no traffic. `--json-stream` sends the same statistics to the webpage; see [the protocol](docs/web-visualization.md).
+
+## Batch experiments
+
+Edit [experiments/example.json](experiments/example.json), then run:
 
 ```bash
-# Use a 16x16 grid (grid-factor=4)
-./bin/tsvra --grid-factor 4
-
-# Runtime failure mode
-./bin/tsvra --failure-mode b --failure-rate 1e-5
-
-# Custom output prefix
-./bin/tsvra --output experiment1
-
-# Fixed random seed for reproducible results
-./bin/tsvra --seed 12345
+python3 experiments.py --config experiments/example.json --jobs 4
 ```
 
-## Configuration Parameters
+The runner uses the Python standard library, preserves per-run outputs and aggregates reproducible comparisons. `--jobs 1` runs sequentially.
 
-| Parameter | Description | Default |
-|------|------|--------|
-| `num_layers` | Number of chip layers | 2 |
-| `grid_factor` | Grid factor (grid size = 4 × grid_factor) | 4 (16x16) |
-| `failure_mode` | Failure mode (a/b/c) | a |
-| `failure_rate` | TSV failure probability | 1e-6 |
-| `vertical_delay` | Vertical transmission delay | 1 |
-| `horizontal_delay` | Horizontal transmission delay | 1000 |
-| `max_horizontal_distance` | Maximum per-request horizontal hops (0 = unlimited) | 0 |
-| `simulation_cycles` | Number of simulation cycles | 100000 |
-| `output_prefix` | Output file prefix | tsvra_output |
-| `random_seed` | Random seed (0 = random) | 0 |
+## Editing the code
 
-## Output Files
+- `config`, `grid`, `router`: parameters, channels/spares and A*.
+- `request_generator`, `simulator`: traffic and the common CLI/web loop.
+- `power_model`, `statistics`: energy formulas and exports.
+- `web-nuxt`: typed configuration, WebSocket bridge and visualizations.
+- `tests`: routing/accounting, spatial failures and numerical power checks.
+- `archive`: original data, legacy scripts and reports; see [archive notes](archive/README.md).
 
-The simulator generates two CSV files:
-
-1. **`{prefix}_summary.csv`**: Summary statistics
-   - Total, completed, and failed request counts
-   - Success rate
-   - Average horizontal distance across terminal requests
-   - Average, maximum, and minimum latency
-   - TSV failure statistics
-
-2. **`{prefix}_requests.csv`**: Detailed request records
-   - Start and destination coordinates for each request
-   - Generation time, completion time, latency, and horizontal distance
-   - Final status (completed/failed)
-
-## Project Structure
-
-```
-TSVRA/
-├── CMakeLists.txt          # CMake build configuration
-├── README.md               # This file
-├── config.ini              # Example configuration file
-├── include/                # Header files
-│   ├── config.hpp          # Configuration management
-│   ├── tsv.hpp             # TSV unit
-│   ├── grid.hpp            # TSV grid
-│   ├── router.hpp          # A* routing algorithm
-│   ├── request.hpp         # Request definition
-│   ├── request_generator.hpp # Request generator
-│   ├── simulator.hpp       # Simulation engine
-│   └── statistics.hpp      # Statistics output
-└── src/                    # Source files
-    ├── config.cpp
-    ├── tsv.cpp
-    ├── grid.cpp
-    ├── router.cpp
-    ├── request_generator.cpp
-    ├── simulator.cpp
-    ├── statistics.cpp
-    └── main.cpp            # Program entry point
-```
-
-## Core Algorithms
-
-### TSV Grid Layout
-
-- Grid size: N × N × L (N = 4 × grid_factor, L = num_layers)
-- Redundant TSV positions: the four corners of each 4x4 region
-- Coordinate system: (x, y, z), where z is the layer index
-
-### A* Routing
-
-- **Heuristic**: Manhattan distance (extensible)
-- **Movement rules**:
-  - Horizontal movement (same layer): delay = horizontal_delay
-  - Vertical movement (inter-layer TSV): delay = vertical_delay
-- **Routing strategy**:
-  - Avoid failed TSVs
-  - Consider TSV occupancy time
-  - Prefer the shortest available path
-
-### Failure Model
-
-- **Mode a (initial failures)**: Random TSV failures at simulation startup
-- **Mode b (runtime failures)**: Dynamic failures introduced during simulation
-- **Mode c (mixed failures)**: Combination of a and b
-
-### Request Generation
-
-- **Hotspot regions**: 4x4 TSV blocks are the base unit, each with a random heat value
-- **Generation strategy**: Weighted random sampling based on heat values
-- **Request frequency**: Roughly one request every 100 cycles on average (adjustable)
-
-## Compiler Warnings
-
-The project uses strict compiler options to keep code quality high:
-
-- `-Wall -Wextra -Wpedantic`: enable standard warnings
-- `-Werror`: treat warnings as errors
-- Additional warning flags are listed in `CMakeLists.txt`
-
-## Extensibility
-
-### Custom Heuristics
-
-```cpp
-// Set a custom heuristic in Router
-router.set_heuristic([](const Point& a, const Point& b) {
-    // Custom distance calculation
-    return custom_distance(a, b);
-});
-```
-
-### Adjusting the Request Generation Rate
-
-Modify `request_probability` in `request_generator.cpp`:
-
-```cpp
-double request_probability = 0.01; // 1% probability per cycle
-```
-
-## License
-
-[Add your license information here]
-
-## Authors
-
-[Add author information here]
-
-## Acknowledgments
-
-This project is used for research and performance evaluation of 3D-chip TSV routing algorithms.
+Keep parameters in configuration files, units in field names and hardware assumptions in `docs/power-model.md`. Historical results and bytecode caches are outside the active runtime path.

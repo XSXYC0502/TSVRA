@@ -3,6 +3,8 @@ import { createInterface } from 'readline';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
+import type { LaunchConfig } from '../../types/simulation';
+import { buildSimulatorArgs } from '../../shared/simulationConfig';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -53,20 +55,19 @@ function resolveBinPath(): string {
   throw new Error(`tsvra binary not found. Set TSVRA_BIN or build the project first. Searched:\n${candidates.join('\n')}`);
 }
 
-export type SimConfig = {
-  numLayers: number;
-  gridFactor: number;
-  failureMode: 'a' | 'b' | 'c';
-  failureRate: number;
-  verticalDelay: number;
-  horizontalDelay: number;
-  cycles: number;
-  seed?: number;
-  lambda1?: number;
-  lambda2?: number;
-  maxPathLength?: number;
-  reliabilityMin?: number;
-};
+function resolveSimulationRoot(binPath: string): string {
+  const explicitRoot = process.env.TSVRA_ROOT?.trim();
+  if (explicitRoot) return path.resolve(explicitRoot);
+  // Build and MSVC configuration subdirectories, plus development/preview cwd.
+  const candidates = [process.cwd(), path.resolve(process.cwd(), '..')];
+  let directory = path.dirname(binPath);
+  for (let depth = 0; depth < 4; depth++) {
+    candidates.push(directory);
+    directory = path.dirname(directory);
+  }
+  return candidates.find(candidate => fs.existsSync(path.join(candidate, 'power_model.ini'))) ??
+    (path.basename(process.cwd()) === 'web-nuxt' ? path.resolve(process.cwd(), '..') : process.cwd());
+}
 
 export class SimulationManager {
   private process: ChildProcess | null = null;
@@ -87,7 +88,7 @@ export class SimulationManager {
     this.onStderr = onStderr;
   }
 
-  start(config: SimConfig): void {
+  start(config: LaunchConfig): void {
     if (this.process) {
       this.kill();
     }
@@ -100,28 +101,15 @@ export class SimulationManager {
       return;
     }
 
-    const args = [
-      '--json-stream',
-      '--layers', String(config.numLayers),
-      '--grid-factor', String(config.gridFactor),
-      '--failure-mode', config.failureMode,
-      '--failure-rate', String(config.failureRate),
-      '--vertical-delay', String(config.verticalDelay),
-      '--horizontal-delay', String(config.horizontalDelay),
-      '--cycles', String(config.cycles),
-    ];
-
-    if (config.seed !== undefined) args.push('--seed', String(config.seed));
-    if (config.lambda1 !== undefined) args.push('--lambda1', String(config.lambda1));
-    if (config.lambda2 !== undefined) args.push('--lambda2', String(config.lambda2));
-    if (config.maxPathLength !== undefined) args.push('--max-path-length', String(config.maxPathLength));
-    if (config.reliabilityMin !== undefined) args.push('--reliability-min', String(config.reliabilityMin));
+    const args = buildSimulatorArgs(config);
 
     console.log(`[SimulationManager] Spawning: ${binPath} ${args.join(' ')}`);
 
-    this.process = spawn(binPath, args, {
+    const child = spawn(binPath, args, {
       stdio: ['pipe', 'pipe', 'pipe'],
+      cwd: resolveSimulationRoot(binPath),
     });
+    this.process = child;
 
     const rl = createInterface({ input: this.process.stdout! });
     rl.on('line', (line: string) => {
@@ -151,7 +139,7 @@ export class SimulationManager {
 
     this.process.on('exit', (code: number | null) => {
       this.onExit(code);
-      this.process = null;
+      if (this.process === child) this.process = null;
     });
   }
 
@@ -164,9 +152,6 @@ export class SimulationManager {
   }
 
   sendCommand(cmd: string): void {
-    const writable = this.process?.stdin?.writable ?? false;
-    const pid = this.process?.pid ?? null;
-    console.log(`[SIM-MGR] sendCommand('${cmd}') | pid=${pid} writable=${writable}`);
     if (this.process?.stdin?.writable) {
       this.process.stdin.write(cmd);
     }

@@ -9,7 +9,6 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { LineSegments2 } from 'three/addons/lines/LineSegments2.js';
 import { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js';
 import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
-import type { TSVState, SimConfig, FailureEvent } from '~/types/simulation';
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -26,7 +25,19 @@ import { Bar, Line } from 'vue-chartjs';
 ChartJS.register(CategoryScale, LinearScale, BarElement, LineElement, PointElement, Filler, Tooltip, Legend);
 
 const store = useSimulationStore();
-const { tsvGrid, config, failureTimeline, failedTSVPositions, activeView } = storeToRefs(store);
+const { tsvGrid, config, failureCountTimeline, failedTSVPositions, activeView, failureHotspots, failureProbabilities } = storeToRefs(store);
+const showHotspots = ref(true);
+const probabilityRange = computed(() => {
+  if (!failureProbabilities.value.length) return null;
+  let initialMin = 1, initialMax = 0, runtimeMin = 1, runtimeMax = 0;
+  for (const probability of failureProbabilities.value) {
+    initialMin = Math.min(initialMin, probability.initial);
+    initialMax = Math.max(initialMax, probability.initial);
+    runtimeMin = Math.min(runtimeMin, probability.runtime);
+    runtimeMax = Math.max(runtimeMax, probability.runtime);
+  }
+  return { initialMin, initialMax, runtimeMin, runtimeMax };
+});
 
 const layerSpacing = 3;
 
@@ -40,6 +51,7 @@ let animationId = 0;
 let resizeObserver: ResizeObserver | null = null;
 let failureMesh: THREE.InstancedMesh | null = null;
 let gridFrame: LineSegments2 | null = null;
+let hotspotMarkers: THREE.Group | null = null;
 
 const dummy = new THREE.Object3D();
 const tempColor = new THREE.Color();
@@ -54,11 +66,10 @@ const isVisible = computed(() => activeView.value === 'failure' || activeView.va
 
 // Failure timeline chart data
 const failureTimelineChartData = computed(() => {
-  const data = failureTimeline.value;
+  const data = failureCountTimeline.value;
   if (data.length === 0) return null;
 
-  const sorted = [...data].sort((a, b) => a.cycle - b.cycle);
-  let points = sorted.map((f, i) => ({ cycle: f.cycle, cumulative: i + 1 }));
+  let points = data.map(point => ({ cycle: point.cycle, cumulative: point.value }));
   if (points.length > 200) {
     const step = Math.ceil(points.length / 200);
     points = points.filter((_, i) => i % step === 0 || i === points.length - 1);
@@ -114,13 +125,10 @@ const redundancyChartData = computed(() => {
   for (let ry = 0; ry < numRegions; ry++) {
     for (let rx = 0; rx < numRegions; rx++) {
       let failedR = 0, totalF = 0;
-      for (let z = 0; z < config.value.numLayers; z++) {
-        for (let dy = 0; dy < 4; dy++) {
-          for (let dx = 0; dx < 4; dx++) {
-            const tsv = tsvGrid.value[z]?.[ry * 4 + dy]?.[rx * 4 + dx];
-            if (tsv?.failed) { totalF++; if (tsv.redundant) failedR++; }
-          }
-        }
+      for (const position of failedTSVPositions.value) {
+        if (Math.floor(position.x / 4) !== rx || Math.floor(position.y / 4) !== ry) continue;
+        totalF++;
+        if (tsvGrid.value[position.z]?.[position.y]?.[position.x]?.redundant) failedR++;
       }
       if (totalF > 0) regions.push({ region: `(${rx},${ry})`, failed: totalF, failedRedundant: failedR });
     }
@@ -240,6 +248,7 @@ function buildScene() {
   gridFrame = new LineSegments2(lineGeom, lineMat);
   scene.add(gridFrame);
   updateGridFrame();
+  updateHotspotMarkers();
 
   // Initial update
   updateFailureMesh();
@@ -357,8 +366,44 @@ function updateFailureMesh() {
   (failureMesh.material as THREE.Material).needsUpdate = true;
 }
 
+function clearHotspotMarkers() {
+  if (!hotspotMarkers) return;
+  hotspotMarkers.traverse(object => {
+    if (object instanceof THREE.Mesh) {
+      object.geometry.dispose();
+      if (Array.isArray(object.material)) object.material.forEach(material => material.dispose());
+      else object.material.dispose();
+    }
+  });
+  scene?.remove(hotspotMarkers);
+  hotspotMarkers = null;
+}
+
+function updateHotspotMarkers() {
+  clearHotspotMarkers();
+  if (!scene || !config.value || !showHotspots.value || config.value.failureModel?.type !== 'hotspot') return;
+  const half = config.value.gridSize / 2;
+  const radius = config.value.failureModel.hotspotRadius;
+  hotspotMarkers = new THREE.Group();
+  for (const center of failureHotspots.value) {
+    const position = new THREE.Vector3(center.x - half + 0.5, (center.z + 0.5) * layerSpacing, center.y - half + 0.5);
+    const marker = new THREE.Mesh(new THREE.SphereGeometry(0.25, 12, 8), new THREE.MeshBasicMaterial({ color: '#fbbf24' }));
+    marker.position.copy(position);
+    hotspotMarkers.add(marker);
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(Math.max(0, radius - 0.05), radius + 0.05, 64),
+      new THREE.MeshBasicMaterial({ color: '#fbbf24', side: THREE.DoubleSide, transparent: true, opacity: 0.8 })
+    );
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.copy(position);
+    hotspotMarkers.add(ring);
+  }
+  scene.add(hotspotMarkers);
+}
+
 function disposeScene() {
   stopAnimation();
+  clearHotspotMarkers();
   if (resizeObserver) {
     resizeObserver.disconnect();
     resizeObserver = null;
@@ -400,6 +445,8 @@ onMounted(() => {
 onBeforeUnmount(() => {
   disposeScene();
 });
+
+watch([showHotspots, failureHotspots], updateHotspotMarkers);
 
 // Rebuild scene when config changes
 watch([config], () => {
@@ -461,8 +508,11 @@ watch(
     <div class="h-full relative">
       <div ref="canvasContainer" class="absolute inset-0" />
       <!-- Title overlay -->
-      <div class="absolute top-0 left-0 right-0 px-3 py-2 text-sm font-medium text-gray-300 z-10 bg-gray-900/80">
-        Failure Map ({{ failedTSVPositions.length }} failed TSVs)
+      <div class="absolute top-0 left-0 right-0 px-3 py-2 text-sm font-medium text-gray-300 z-10 bg-gray-900/80 flex items-center justify-between gap-2">
+        <span>Failure Map ({{ failedTSVPositions.length }} failed channels)</span>
+        <label v-if="failureHotspots.length" class="text-xs text-amber-300 flex items-center gap-1">
+          <input v-model="showHotspots" type="checkbox"> Fixed Hotspots
+        </label>
       </div>
       <!-- Legend -->
       <div class="absolute bottom-2 left-2 z-10 bg-gray-900/80 rounded px-2 py-1.5 text-xs space-y-1">
@@ -478,11 +528,28 @@ watch(
           <span class="inline-block w-3 h-3 rounded-sm" style="background: rgb(255, 38, 38)" />
           <span class="text-gray-300">Failed</span>
         </div>
+        <div v-if="failureHotspots.length && showHotspots" class="flex items-center gap-1.5">
+          <span class="inline-block w-3 h-3 rounded-full border border-amber-300" />
+          <span class="text-amber-300">Failure center / Gaussian radius</span>
+        </div>
       </div>
     </div>
 
     <!-- Charts -->
     <div class="space-y-2 p-2">
+      <div class="bg-gray-800/30 rounded-lg p-3 border border-gray-700/30 text-xs space-y-2">
+        <h3 class="text-sm font-medium text-gray-300">Failure Distribution: {{ config.failureModel?.type === 'hotspot' ? 'Fixed Gaussian Hotspots' : 'Uniform' }}</h3>
+        <p class="text-gray-400">Each failure disables one logical 64-bit vertical channel connecting lower layer z to z + 1. Fixed failure hotspots are independent of the traffic heatmap.</p>
+        <p v-if="config.actualSeed !== undefined" class="text-gray-500">Actual seed: {{ config.actualSeed }}</p>
+        <p v-if="failureHotspots.length" class="text-amber-300">
+          Centers (x, y, lower z): {{ failureHotspots.map(p => `(${p.x}, ${p.y}, ${p.z})`).join('; ') }}.
+          Radius: {{ config.failureModel.hotspotRadius }} grid units; multiplier: {{ config.failureModel.hotspotMultiplier }}.
+        </p>
+        <div v-if="probabilityRange" class="text-gray-400 space-y-1">
+          <p>Initial probability range: {{ probabilityRange.initialMin.toExponential(3) }} – {{ probabilityRange.initialMax.toExponential(3) }}</p>
+          <p>Runtime probability / cycle: {{ probabilityRange.runtimeMin.toExponential(3) }} – {{ probabilityRange.runtimeMax.toExponential(3) }}</p>
+        </div>
+      </div>
       <!-- Failure Timeline -->
       <div class="bg-gray-800/30 rounded-lg p-3 border border-gray-700/30">
         <h3 class="text-sm font-medium text-gray-300 mb-2">Failure Timeline</h3>

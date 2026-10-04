@@ -1,0 +1,45 @@
+{
+  "target": "network_total_power_mW",
+  "features": [
+    "router_count",
+    "num_layers",
+    "flit_width_bit",
+    "injection_rate_flit_per_cycle_router",
+    "toggle_rate_transition_per_bit_flit",
+    "hotspot_weight",
+    "avg_horizontal_hops",
+    "avg_vertical_hops",
+    "redundant_vertical_fraction",
+    "initial_fault_rate",
+    "cluster_intensity",
+    "reroute_rate",
+    "horizontal_length_um",
+    "tsv_width_um",
+    "tsv_height_um",
+    "tsv_liner_um",
+    "tsv_total_cap_fF",
+    "tsv_resistance_ohm",
+    "traffic_model",
+    "tsv_profile"
+  ],
+  "model": "HistGradientBoostingRegressor",
+  "random_state": 20260813,
+  "validation": {
+    "n": 1792,
+    "mae_mW": 60.75842668512484,
+    "rmse_mW": 146.54950375807442,
+    "r2": 0.9968489140409514,
+    "mape_pct": 5.769590191503092,
+    "median_ape_pct": 3.3645673195911177
+  },
+  "test": {
+    "n": 1815,
+    "mae_mW": 58.373349110763954,
+    "rmse_mW": 149.25663408430756,
+    "r2": 0.9961514849772761,
+    "mape_pct": 6.221377835154084,
+    "median_ape_pct": 3.5873940062255403
+  },
+  "scope": "45nm, 1.0V, 1GHz; physics-plus-DSENT-calibrated labels",
+  "warning": "Not silicon-measured signoff power. Do not extrapolate across process, voltage, or frequency."
+}
