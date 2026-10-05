@@ -2,6 +2,8 @@
 
 The simulator estimates energy with an explicit idle term and counters for actual launched hops. It loads editable coefficients from `power_model.ini`; simulation and batch execution need no DSENT installation, training, NumPy, scikit-learn, or model prediction service. The default router coefficients were generated offline using the original MIT DSENT implementation. This is an architectural estimate with documented circuit and geometry assumptions.
 
+The [retained August 2026 power-prediction package](power-model-final/README_final_plan.md) contains a synthetic training dataset and a fitted regressor for a separate research workflow. The simulator does not load its CSV, spreadsheet, or trained model. Its dataset assumptions and saved regression metrics should not be presented as calibration or validation of the runtime coefficients below.
+
 ## Architecture and time
 
 - Each grid point represents one equivalent hardware router. The router population is `num_layers × (4 × grid_factor)²`, including points at boundaries and points serving spare channels. All use the same calibrated router reference.

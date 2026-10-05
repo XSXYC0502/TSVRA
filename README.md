@@ -92,6 +92,6 @@ The runner uses the Python standard library, preserves per-run outputs and aggre
 - `power_model`, `statistics`: energy formulas and exports.
 - `web-nuxt`: typed configuration, WebSocket bridge and visualizations.
 - `tests`: routing/accounting, spatial failures and numerical power checks.
-- `archive`: original data, legacy scripts and reports; see [archive notes](archive/README.md).
+- `docs`: current model/architecture references, report draft, roadmap, and retained research materials; see the [documentation index](docs/README.md).
 
-Keep parameters in configuration files, units in field names and hardware assumptions in `docs/power-model.md`. Historical results and bytecode caches are outside the active runtime path.
+Keep parameters in configuration files, units in field names and hardware assumptions in `docs/power-model.md`. The [retained power-prediction package](docs/power-model-final/README_final_plan.md) and [historical reports](docs/historical-results/README.md) are documented separately from the active runtime model. Bytecode caches are outside the active runtime path.
