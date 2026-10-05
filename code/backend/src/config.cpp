@@ -87,8 +87,8 @@ Config::Config()
       failure_rate_(1e-5), initial_failure_rate_(1e-5), runtime_failure_rate_(1e-5),
       initial_failure_rate_explicit_(false), runtime_failure_rate_explicit_(false),
       vertical_delay_(5), horizontal_delay_(500), router_delay_(15),
-      request_probability_(0.5), power_config_("power_model.ini"),
-      simulation_cycles_(100000), output_prefix_("tsvra_output"), random_seed_(0),
+      request_probability_(0.5), power_config_("code/config/power_model.ini"),
+      simulation_cycles_(100000), output_prefix_("code/output/tsvra_output"), random_seed_(0),
       lambda1_(0.0), lambda2_(0.0), max_path_length_(0), max_horizontal_distance_(0),
       reliability_min_(0.0), json_stream_(false),
       redundancy_layout_(RedundancyLayout::SHARED_SPARE), failure_model_(FailureModel::UNIFORM),
@@ -180,9 +180,9 @@ bool Config::parse_command_line(int argc, char* argv[]) {
                       << "  --horizontal-delay <n>    Horizontal link delay (default: 500)\n"
                       << "  --router-delay <n>        Router delay per actual hop (default: 15)\n"
                       << "  --request-probability <p> Request probability per cycle (default: 0.5)\n"
-                      << "  --power-config <file>     Power configuration (default: power_model.ini)\n"
+                      << "  --power-config <file>     Power configuration (default: code/config/power_model.ini)\n"
                       << "  --cycles <n>              Simulation cycles (default: 100000)\n"
-                      << "  --output <prefix>         Output filename prefix\n"
+                      << "  --output <prefix>         Output prefix (default: code/output/tsvra_output)\n"
                       << "  --seed <n>                Seed (0=random)\n"
                       << "  --lambda1 <v>             Congestion weight >=0\n"
                       << "  --lambda2 <v>             Risk weight >=0\n"

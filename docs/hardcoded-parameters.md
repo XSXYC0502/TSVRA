@@ -4,9 +4,9 @@ This reference replaces the two older hardcoded-parameter inventories. Values be
 
 ## Configuration profiles
 
-The native constructor, checked-in example file, and web launch form use different profiles. The simulator reads `config.ini` only when passed `--config config.ini`. Configuration files are loaded before CLI overrides, regardless of the argument order. The web server builds explicit CLI arguments and does not load `config.ini`.
+The native constructor, checked-in example file, and web launch form use different profiles. The simulator reads `code/config/config.ini` only when passed `--config code/config/config.ini`. Configuration files are loaded before CLI overrides, regardless of the argument order. The web server builds explicit CLI arguments and does not load `code/config/config.ini`.
 
-| Setting | Native defaults (`src/config.cpp`) | Current `config.ini` | Web defaults (`web-nuxt/shared/simulationConfig.ts`) |
+| Setting | Native defaults (`code/backend/src/config.cpp`) | Current `code/config/config.ini` | Web defaults (`code/frontend/shared/simulationConfig.ts`) |
 | --- | --- | --- | --- |
 | Layers | 4 | 2 | 2 |
 | Grid factor / side length | 4 / 16 | 4 / 16 | 4 / 16 |
@@ -23,20 +23,20 @@ The native constructor, checked-in example file, and web launch form use differe
 | Hotspot count / radius / multiplier | 1 / 4 / 5 | 1 / 4 / 5 | 1 / 4 / 5 |
 | `lambda1` / `lambda2` | 0 / 0 | Inherit 0 / 0 | Omitted; inherit 0 / 0 |
 | Path / horizontal distance / reliability constraints | All disabled (0) | All disabled (0) | Omitted; inherit 0 |
-| Power parameter file | `power_model.ini` | `power_model.ini` | Omitted; inherits `power_model.ini` |
+| Power parameter file | `code/config/power_model.ini` | `code/config/power_model.ini` | Omitted; server supplies its absolute path |
 
 The example file remains editable, so its values can diverge from this snapshot. Inspect the effective configuration directly:
 
 ```bash
-./bin/tsvra --print-defaults
-./bin/tsvra --config config.ini --print-defaults
+./code/build/bin/tsvra --print-defaults
+./code/build/bin/tsvra --config code/config/config.ini --print-defaults
 ```
 
 `--print-defaults` prints the effective settings after file and CLI overrides. Runs also export `<prefix>_config.json`, including the actual seed, actual failure hotspot centers, and exact power parameters. The web receives these effective settings in its `init` message.
 
 ## Editable simulation controls
 
-Set these in an INI file or through their CLI flags. `Config::set_option`, `Config::parse_command_line`, and `Config::validate` in [src/config.cpp](../src/config.cpp) define accepted values. For batch experiments, use the same INI-style names in `experiments/example.json`.
+Set these in an INI file or through their CLI flags. `Config::set_option`, `Config::parse_command_line`, and `Config::validate` in [code/backend/src/config.cpp](../code/backend/src/config.cpp) define accepted values. For batch experiments, use the same INI-style names in `code/config/experiments.example.json`.
 
 | INI key | CLI flag | Meaning / native constraints |
 | --- | --- | --- |
@@ -61,7 +61,7 @@ Set these in an INI file or through their CLI flags. `Config::set_option`, `Conf
 | `max_horizontal_distance` | `--max-horizontal-distance` | Unsigned 32-bit limit on accumulated horizontal distance, including detours and previous travel before a reroute; 0 disables it. |
 | `reliability_min` | `--reliability-min` | `[0,1]`; 0 disables the route reliability threshold. |
 | `power_config` | `--power-config` | Nonempty path to the power parameter INI. |
-| `output_prefix` | `--output` | Nonempty prefix for CLI exports; native default is `tsvra_output`. |
+| `output_prefix` | `--output` | Nonempty prefix for CLI exports; native default is `code/output/tsvra_output`. |
 
 Legacy `cluster_strength` and `cluster_radius` still parse. Strength maps to `hotspot_multiplier = 1 + 5 × strength`, and radius maps to `hotspot_radius`. Prefer the hotspot names; these aliases do not implement an evolving failure cluster.
 
@@ -71,14 +71,14 @@ Native layer/grid bounds protect coordinate types (`layers ≤ 2,147,483,647`, `
 
 | Assumption | Current behavior | Relevant source |
 | --- | --- | --- |
-| Grid and traffic regions | Grid side is `4 × grid_factor`. Traffic source/destination regions are always 4×4, independently of the selected spare layout. | `include/config.hpp`, `src/request_generator.cpp`, frontend grid/heatmap helpers |
-| Vertical channels | One bidirectional channel per `(x,y,lower_z)`, joining layers `lower_z` and `lower_z + 1`. Channel count is `side² × (layers − 1)`; the top-layer grid points do not add another interface. | `src/grid.cpp`, `src/simulator.cpp` |
+| Grid and traffic regions | Grid side is `4 × grid_factor`. Traffic source/destination regions are always 4×4, independently of the selected spare layout. | `code/backend/include/config.hpp`, `code/backend/src/request_generator.cpp`, frontend grid/heatmap helpers |
+| Vertical channels | One bidirectional channel per `(x,y,lower_z)`, joining layers `lower_z` and `lower_z + 1`. Channel count is `side² × (layers − 1)`; the top-layer grid points do not add another interface. | `code/backend/src/grid.cpp`, `code/backend/src/simulator.cpp` |
 | Shared spares | Overlapping square blocks have side length `grid_factor` and stride `grid_factor − 1`. Spare locations are `(1 + stride × bi, 1 + stride × bj)` on each interface. A bypass selects the nearest available spare in blocks covering the failed channel on that interface. This is 4×4 with stride 3 only when the factor is 4. | `Grid::build_shared_spare_sites`, `Grid::select_spare` |
 | Legacy spares | `corner4` marks the four corners of each fixed 4×4 region. Its bypass search scans available spares across the same interface. `none` disables spares. | `Grid::build_legacy_corner4_sites`, `Grid::find_bypass_spare` |
-| Traffic spatial weights | Each fixed 4×4 region gets a seeded `0.5 + Uniform(0,1)` weight. Both endpoints sample this fixed region-weight distribution. These traffic hotspots are separate from failure hotspots. | `src/request_generator.cpp` |
-| Traffic endpoints | Source layer is uniform over `0 … layers − 2`; destination is always the top layer. Within a sampled 4×4 region, redundant positions are rejected, with a 100-attempt limit and a fixed fallback. | `src/request_generator.cpp` |
-| Failure process | Initial Bernoulli faults and permanent runtime faults on inter-layer channels. Runtime geometric lifetimes are sampled once and processed from an event queue, rather than resampling every channel every cycle. Hotspot probability maps stay fixed and are mean-normalized with saturation handling. | `src/grid.cpp`; [failure model](failure-model.md) |
-| Routing connectivity | Four horizontal neighbors plus the adjacent layers. The default A* heuristic weights horizontal/vertical Manhattan distance by the corresponding link delay plus router delay. | `src/router.cpp` |
+| Traffic spatial weights | Each fixed 4×4 region gets a seeded `0.5 + Uniform(0,1)` weight. Both endpoints sample this fixed region-weight distribution. These traffic hotspots are separate from failure hotspots. | `code/backend/src/request_generator.cpp` |
+| Traffic endpoints | Source layer is uniform over `0 … layers − 2`; destination is always the top layer. Within a sampled 4×4 region, redundant positions are rejected, with a 100-attempt limit and a fixed fallback. | `code/backend/src/request_generator.cpp` |
+| Failure process | Initial Bernoulli faults and permanent runtime faults on inter-layer channels. Runtime geometric lifetimes are sampled once and processed from an event queue, rather than resampling every channel every cycle. Hotspot probability maps stay fixed and are mean-normalized with saturation handling. | `code/backend/src/grid.cpp`; [failure model](failure-model.md) |
+| Routing connectivity | Four horizontal neighbors plus the adjacent layers. The default A* heuristic weights horizontal/vertical Manhattan distance by the corresponding link delay plus router delay. | `code/backend/src/router.cpp` |
 | Spare bypass path | Detours expand into actual horizontal and vertical hops, with their real delays and distance counts. Spare vertical channels are reserved for bypasses except permitted endpoint crossings. | `Router::route`, `Router::expand_path` |
 | Risk model | Additive `−ln(1−p)` channel hazards; runtime risk includes predicted time exposure. Risk weighting and threshold are configurable, but this probability model is implemented in code. | `Router::route` |
 | Run horizon | Traffic stops at the configured horizon; both native and web runs continue draining in-flight requests. Final elapsed cycles can exceed the horizon. | `Simulator::run` |
@@ -87,13 +87,13 @@ Changing region size, spare placement, endpoints, or channel semantics requires 
 
 ## Power parameters and circuit assumptions
 
-[power_model.ini](../power_model.ini) contains editable coefficients and provenance for the active explicit model. The default operating reference is 1 GHz, 1 V, a 64-bit flit, and 64 physical signal TSVs per vertical channel. Router population is `layers × side²`. The equivalent router reference has 6 ports, 8 virtual channels, and 2 buffers per virtual channel; these are calibration assumptions, not simulated queues.
+[code/config/power_model.ini](../code/config/power_model.ini) contains editable coefficients and provenance for the active explicit model. The default operating reference is 1 GHz, 1 V, a 64-bit flit, and 64 physical signal TSVs per vertical channel. Router population is `layers × side²`. The equivalent router reference has 6 ports, 8 virtual channels, and 2 buffers per virtual channel; these are calibration assumptions, not simulated queues.
 
-The loader currently requires `flit_bits = physical_signal_tsvs = 64`; widening a flit requires code changes and new calibration. Frequency changes the cycle-to-seconds mapping; voltage changes capacitive link energy. Neither automatically re-characterizes router coefficients. TSV width/height fields record geometry provenance and do not automatically derive capacitance. See [the power model reference](power-model.md) and `tools/power_calibration/` for the complete coefficients and captured DSENT evidence. [power-model-final/](power-model-final/) preserves the earlier power planning/data package and is separate from runtime configuration.
+The loader currently requires `flit_bits = physical_signal_tsvs = 64`; widening a flit requires code changes and new calibration. Frequency changes the cycle-to-seconds mapping; voltage changes capacitive link energy. Neither automatically re-characterizes router coefficients. TSV width/height fields record geometry provenance and do not automatically derive capacitance. See [the power model reference](power-model.md) and `code/scripts/power_calibration/` for the complete coefficients and captured DSENT evidence. [power-model-final/](power-model-final/) preserves the earlier power planning/data package and is separate from runtime configuration.
 
 ## Web limits and presentation settings
 
-Web validation lives in [shared/simulationConfig.ts](../web-nuxt/shared/simulationConfig.ts) and is applied by the form and server. It rejects strings, nonfinite numbers, and fractional integer counts. Layers are limited to 2–10 and factor to 1–16 (3–16 for `shared`), so the largest accepted side is 64. Link delays are 1–`10^9`, router delay is 0–`10^9`, and traffic horizon is 1–`10^9` cycles. Seed is 0–`2^32−1`. Hotspot count is 1–1000; positive radius and multiplier at least 1 are bounded by `10^9`. Manual center count must match the selected count.
+Web validation lives in [shared/simulationConfig.ts](../code/frontend/shared/simulationConfig.ts) and is applied by the form and server. It rejects strings, nonfinite numbers, and fractional integer counts. Layers are limited to 2–10 and factor to 1–16 (3–16 for `shared`), so the largest accepted side is 64. Link delays are 1–`10^9`, router delay is 0–`10^9`, and traffic horizon is 1–`10^9` cycles. Seed is 0–`2^32−1`. Hotspot count is 1–1000; positive radius and multiplier at least 1 are bounded by `10^9`. Manual center count must match the selected count.
 
 These are web launch bounds; edit the shared validator and form together to change them. The web validator also accepts optional routing controls and `powerConfig`, which the current form does not expose. Simulator discovery and working-directory overrides are `TSVRA_BIN` and `TSVRA_ROOT` in `server/utils/simulationManager.ts`.
 

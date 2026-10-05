@@ -1,73 +1,15 @@
 import { ChildProcess, spawn } from 'child_process';
 import { createInterface } from 'readline';
 import path from 'path';
-import fs from 'fs';
 import { fileURLToPath } from 'url';
 import type { LaunchConfig } from '../../types/simulation';
 import { buildSimulatorArgs } from '../../shared/simulationConfig';
+import { resolveBinPath, resolveSimulationRoot } from './simulatorPaths';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const WINDOWS_CONFIG_DIRS = ['Debug', 'Release', 'RelWithDebInfo', 'MinSizeRel'];
-
-function getCandidateBinPaths(): string[] {
-  const executableNames = process.platform === 'win32'
-    ? ['tsvra.exe', 'tsvra']
-    : ['tsvra', 'tsvra.exe'];
-
-  const candidateDirs = [
-    path.resolve(__dirname, '../../../bin'),
-    path.resolve(process.cwd(), '../bin'),
-    path.resolve(process.cwd(), 'bin'),
-    path.resolve(__dirname, '../../../build'),
-    path.resolve(process.cwd(), '../build'),
-    path.resolve(process.cwd(), 'build'),
-    ...WINDOWS_CONFIG_DIRS.flatMap((config) => [
-      path.resolve(__dirname, `../../../bin/${config}`),
-      path.resolve(__dirname, `../../../build/${config}`),
-      path.resolve(process.cwd(), `../bin/${config}`),
-      path.resolve(process.cwd(), `../build/${config}`),
-      path.resolve(process.cwd(), `bin/${config}`),
-      path.resolve(process.cwd(), `build/${config}`),
-    ]),
-  ];
-
-  const explicitBin = process.env.TSVRA_BIN?.trim();
-  const candidates = explicitBin ? [path.resolve(explicitBin)] : [];
-
-  for (const dir of candidateDirs) {
-    for (const executableName of executableNames) {
-      candidates.push(path.join(dir, executableName));
-    }
-  }
-
-  return [...new Set(candidates)];
-}
-
-function resolveBinPath(): string {
-  const candidates = getCandidateBinPaths();
-  for (const candidate of candidates) {
-    if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) {
-      return candidate;
-    }
-  }
-  throw new Error(`tsvra binary not found. Set TSVRA_BIN or build the project first. Searched:\n${candidates.join('\n')}`);
-}
-
-function resolveSimulationRoot(binPath: string): string {
-  const explicitRoot = process.env.TSVRA_ROOT?.trim();
-  if (explicitRoot) return path.resolve(explicitRoot);
-  // Build and MSVC configuration subdirectories, plus development/preview cwd.
-  const candidates = [process.cwd(), path.resolve(process.cwd(), '..')];
-  let directory = path.dirname(binPath);
-  for (let depth = 0; depth < 4; depth++) {
-    candidates.push(directory);
-    directory = path.dirname(directory);
-  }
-  return candidates.find(candidate => fs.existsSync(path.join(candidate, 'power_model.ini'))) ??
-    (path.basename(process.cwd()) === 'web-nuxt' ? path.resolve(process.cwd(), '..') : process.cwd());
-}
+const runtimeLocation = { moduleDirectory: __dirname };
 
 export class SimulationManager {
   private process: ChildProcess | null = null;
@@ -95,19 +37,23 @@ export class SimulationManager {
 
     let binPath: string;
     try {
-      binPath = resolveBinPath();
+      binPath = resolveBinPath(runtimeLocation);
     } catch (err) {
       this.onError(err as Error);
       return;
     }
 
-    const args = buildSimulatorArgs(config);
+    const root = resolveSimulationRoot(runtimeLocation);
+    const args = buildSimulatorArgs({
+      ...config,
+      powerConfig: config.powerConfig ?? path.join(root, 'code/config/power_model.ini'),
+    });
 
     console.log(`[SimulationManager] Spawning: ${binPath} ${args.join(' ')}`);
 
     const child = spawn(binPath, args, {
       stdio: ['pipe', 'pipe', 'pipe'],
-      cwd: resolveSimulationRoot(binPath),
+      cwd: root,
     });
     this.process = child;
 
@@ -145,7 +91,7 @@ export class SimulationManager {
 
   getBinPath(): string | null {
     try {
-      return resolveBinPath();
+      return resolveBinPath(runtimeLocation);
     } catch {
       return null;
     }

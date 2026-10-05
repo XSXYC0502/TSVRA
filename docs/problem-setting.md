@@ -147,7 +147,7 @@ Power counters count actually launched hops, including unsuccessful traffic and 
 
 ## Native configuration defaults
 
-`./bin/tsvra --print-defaults` reports the effective native configuration. A file is loaded only with `--config`; command-line values then override file values. [config.ini](../config.ini) is an editable example profile with its own choices, and the browser form also supplies a profile. Their values should not be treated as C++ constructor defaults.
+`./code/build/bin/tsvra --print-defaults` reports the effective native configuration. A file is loaded only with `--config`; command-line values then override file values. [code/config/config.ini](../code/config/config.ini) is an editable example profile with its own choices, and the browser form also supplies a profile. Their values should not be treated as C++ constructor defaults.
 
 | Parameter | Native default |
 | --- | --- |
@@ -164,6 +164,6 @@ Power counters count actually launched hops, including unsuccessful traffic and 
 | `reliability_min` | 0.0 |
 | `hotspot_count`, `hotspot_radius`, `hotspot_multiplier` | 1, 4 grid cells, 5 |
 | `hotspot_centers` | Empty: use seeded automatic centers in hotspot mode |
-| `power_config`, `output_prefix` | `power_model.ini`, `tsvra_output` |
+| `power_config`, `output_prefix` | `code/config/power_model.ini`, `code/output/tsvra_output` |
 
-Implementation references: [grid.cpp](../src/grid.cpp), [request_generator.cpp](../src/request_generator.cpp), [router.cpp](../src/router.cpp), [simulator.cpp](../src/simulator.cpp), [statistics.cpp](../src/statistics.cpp), and [config.cpp](../src/config.cpp). The topology, bypass timing, constraints, risk, drain and CLI/JSON accounting are exercised by the [native tests](../tests/test_main.cpp), [failure tests](../tests/failure_tests.cpp) and [integration tests](../tests/integration_tests.py).
+Implementation references: [grid.cpp](../code/backend/src/grid.cpp), [request_generator.cpp](../code/backend/src/request_generator.cpp), [router.cpp](../code/backend/src/router.cpp), [simulator.cpp](../code/backend/src/simulator.cpp), [statistics.cpp](../code/backend/src/statistics.cpp), and [config.cpp](../code/backend/src/config.cpp). The topology, bypass timing, constraints, risk, drain and CLI/JSON accounting are exercised by the [native tests](../code/backend/tests/test_main.cpp), [failure tests](../code/backend/tests/failure_tests.cpp) and [integration tests](../code/backend/tests/integration_tests.py).

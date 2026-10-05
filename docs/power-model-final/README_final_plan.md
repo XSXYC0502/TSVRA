@@ -4,7 +4,7 @@
 
 This is the retained August 2026 research package: its complete synthetic dataset, spreadsheet, trained regressor, scripts, and evaluation outputs are kept together here. Run its scripts from `docs/power-model-final/` with the dependencies in `requirements.txt`.
 
-The current simulator uses an explicit event/idle energy model, configured by the repository-root `power_model.ini` and documented in [the runtime power model](../power-model.md). It does not load this package or call its regressor. Current offline router calibration evidence is in `tools/power_calibration/`, relative to the repository root. The two workflows use different power assumptions, so the saved regression metrics below do not validate the current simulator's coefficients.
+The current simulator uses an explicit event/idle energy model, configured by `code/config/power_model.ini` relative to the repository root and documented in [the runtime power model](../power-model.md). It does not load this package or call its regressor. Current offline router calibration evidence is in `code/scripts/power_calibration/`. The two workflows use different power assumptions, so the saved regression metrics below do not validate the current simulator's coefficients.
 
 The original script that generated the synthetic labels was not supplied. `train_power_model.py` retrains a regressor from the supplied CSV; it does not regenerate the dataset. The data split and training seed are fixed, but the dependency versions are lower bounds rather than a pinned environment, so exact retraining results can vary with library versions.
 

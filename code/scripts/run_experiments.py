@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """One editable, concurrent TSVRA batch runner; Python standard library only.
 
-Edit experiments/example.json, then run python3 experiments.py. Each run keeps
+Edit code/config/experiments.example.json, then run python3 code/scripts/run_experiments.py. Each run keeps
 its simulator CSVs, power trace, exact configuration, and log. Combined reports
 are refreshed as runs finish. Relative paths are relative to the repository.
 """
@@ -25,7 +25,7 @@ from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from dataclasses import dataclass
 from pathlib import Path
 
-PROJECT = Path(__file__).resolve().parent
+PROJECT = Path(__file__).resolve().parents[2]
 OPTIONS = {
     "num_layers": "--layers", "grid_factor": "--grid-factor",
     "failure_mode": "--failure-mode", "failure_rate": "--failure-rate",
@@ -96,6 +96,15 @@ class RunControl:
 def project_path(value) -> Path:
     path = Path(value)
     return path.resolve() if path.is_absolute() else (PROJECT / path).resolve()
+
+
+def default_binary() -> Path:
+    executable = "tsvra.exe" if os.name == "nt" else "tsvra"
+    candidates = [PROJECT / "code" / "build" / "bin" / executable]
+    if os.name == "nt":
+        candidates.append(PROJECT / "code" / "build" / "windows-msvc" / "bin" / executable)
+        candidates.append(PROJECT / "code" / "build" / "mingw" / "bin" / executable)
+    return next((path for path in candidates if path.is_file()), candidates[0])
 
 
 def positive_integer(value, name: str) -> int:
@@ -428,17 +437,22 @@ def progress(control: RunControl, finished: int, total: int, runs_dir: Path):
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--config", type=Path, default=PROJECT / "experiments" / "example.json")
+    parser.add_argument("--config", type=Path, default=PROJECT / "code" / "config" / "experiments.example.json")
     parser.add_argument("--binary", type=Path)
     parser.add_argument("--output-dir", type=Path)
     parser.add_argument("--jobs", type=int)
     parser.add_argument("--dry-run", action="store_true", help="Validate settings and print simulator argument arrays")
     args = parser.parse_args()
     try:
-        spec = json.loads(args.config.read_text(encoding="utf-8"))
+        spec = json.loads(project_path(args.config).read_text(encoding="utf-8"))
         tasks = build_tasks(spec)
-        binary = project_path(args.binary or spec.get("binary", "bin/tsvra"))
-        output = project_path(args.output_dir or spec.get("output_dir", "output/experiments"))
+        if args.binary is not None:
+            binary = project_path(args.binary)
+        elif "binary" in spec:
+            binary = project_path(spec["binary"])
+        else:
+            binary = default_binary()
+        output = project_path(args.output_dir or spec.get("output_dir", "code/output/experiments"))
         jobs = positive_integer(args.jobs if args.jobs is not None else spec.get("jobs", min(4, os.cpu_count() or 1)), "jobs")
         timeout = spec.get("timeout_seconds")
         if timeout is not None and (isinstance(timeout, bool) or not isinstance(timeout, (int, float))

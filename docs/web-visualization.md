@@ -3,27 +3,27 @@
 The browser configures and controls the native simulator through one Nitro WebSocket endpoint:
 
 ```text
-Vue views / Pinia ↔ WebSocket /api/_ws ↔ Nitro ↔ stdio ↔ bin/tsvra --json-stream
+Vue views / Pinia ↔ WebSocket /api/_ws ↔ Nitro ↔ stdio ↔ code/build/bin/tsvra --json-stream
 ```
 
 Nitro forwards native JSON lines and controls pacing over stdin. The browser's playback speed changes how quickly cycles execute, while power and energy use simulated time. All views share the same store. [architecture.md](architecture.md) maps the implementation modules and rendering responsibilities.
 
 ## Setup
 
-Build the C++ project first using the [root README](../README.md), then run these commands from `web-nuxt/`:
+Build the C++ project first using the [root README](../README.md), then run these commands from `code/frontend/`:
 
 ```bash
 npm ci
 npm run dev
 ```
 
-The development server serves the SPA and WebSocket endpoint together. `npm run build` produces `.output/`; `npm run preview` runs the production preview. [`simulationManager.ts`](../web-nuxt/server/utils/simulationManager.ts) searches common binary locations, including `tsvra.exe` and MSVC configuration folders. `TSVRA_BIN` can select the executable and `TSVRA_ROOT` can select its working directory. Keep `power_model.ini` available in that directory, or specify an explicit `powerConfig` path in launch settings.
+The development server serves the SPA and WebSocket endpoint together. `npm run build` produces `.output/`; `npm run preview` runs the production preview. [`simulatorPaths.ts`](../code/frontend/server/utils/simulatorPaths.ts) discovers the repository/runtime root and searches the native build directories, including Windows executables and configuration folders. `TSVRA_BIN` selects a custom executable and `TSVRA_ROOT` selects its working directory. The manager supplies an absolute default power-file path under that root's `code/config/`; an explicit `powerConfig` path keeps its working-directory-relative or absolute meaning.
 
-The browser form and WebSocket server use [`shared/simulationConfig.ts`](../web-nuxt/shared/simulationConfig.ts) for validation. The manager passes the resulting configuration as an argument array to the executable. Native configuration parsing and validation still apply.
+The browser form and WebSocket server use [`shared/simulationConfig.ts`](../code/frontend/shared/simulationConfig.ts) for validation. The manager passes the resulting configuration as an argument array to the executable. Native configuration parsing and validation still apply.
 
 ## Launch settings
 
-Browser defaults come from `defaultLaunchConfig()`. They differ from native defaults: the browser uses two layers, combined failures, initial/runtime probabilities of `0.000001`, vertical/horizontal/router delays of `1/1000/15`, and a 10,000-cycle generation horizon. Both use a grid factor of 4, shared redundancy, uniform failure distribution, request probability 0.5 and seed 0 (random). Native defaults can be inspected with `./bin/tsvra --print-defaults`.
+Browser defaults come from `defaultLaunchConfig()`. They differ from native defaults: the browser uses two layers, combined failures, initial/runtime probabilities of `0.000001`, vertical/horizontal/router delays of `1/1000/15`, and a 10,000-cycle generation horizon. Both use a grid factor of 4, shared redundancy, uniform failure distribution, request probability 0.5 and seed 0 (random). Native defaults can be inspected with `./code/build/bin/tsvra --print-defaults`.
 
 | Launch field | Native option | Meaning |
 |---|---|---|
@@ -44,7 +44,7 @@ The server accepts 2–10 layers and grid factors up to 16. Shared redundancy re
 
 ## Native JSON-line protocol
 
-[`src/simulator.cpp`](../src/simulator.cpp) emits one JSON object per stdout line. Diagnostics go to stderr. Stream mode uses the same generation/drain loop as the CLI, with cycles indexed from 0. The configured horizon ends request generation; cycle messages can continue through drain until all requests terminate. JSON mode does not write the normal batch CSV/configuration exports.
+[`code/backend/src/simulator.cpp`](../code/backend/src/simulator.cpp) emits one JSON object per stdout line. Diagnostics go to stderr. Stream mode uses the same generation/drain loop as the CLI, with cycles indexed from 0. The configured horizon ends request generation; cycle messages can continue through drain until all requests terminate. JSON mode does not write the normal batch CSV/configuration exports.
 
 ### Initialization
 
@@ -124,7 +124,7 @@ import json
 import subprocess
 
 run = subprocess.run(
-    ["./bin/tsvra", "--json-stream", "--cycles", "40", "--seed", "42"],
+    ["./code/build/bin/tsvra", "--json-stream", "--cycles", "40", "--seed", "42"],
     input="r", text=True, capture_output=True, check=True,
 )
 messages = [json.loads(line) for line in run.stdout.splitlines()]
@@ -135,7 +135,7 @@ Long-running integrations should consume stdout and stderr continuously. Keep st
 
 ## WebSocket protocol
 
-[`server/api/_ws.ts`](../web-nuxt/server/api/_ws.ts) serves `/api/_ws`; each connection owns its own simulator process.
+[`server/api/_ws.ts`](../code/frontend/server/api/_ws.ts) serves `/api/_ws`; each connection owns its own simulator process.
 
 | Server → browser message | Meaning |
 |---|---|
@@ -158,7 +158,7 @@ A valid minimal launch is `{"type":"start","config":{"cycles":40,"seed":42}}`; t
 
 ### Playback credits and lifecycle
 
-[`useWebSocket.ts`](../web-nuxt/composables/useWebSocket.ts) sends the first batch after `init`, including one initial cycle in step mode. Subsequent automatic batches are sent after the current batch is processed:
+[`useWebSocket.ts`](../code/frontend/composables/useWebSocket.ts) sends the first batch after `init`, including one initial cycle in step mode. Subsequent automatic batches are sent after the current batch is processed:
 
 | Speed | Cycles per ack | Delay before next ack |
 |---|---|---|
@@ -174,6 +174,6 @@ Normal completion and Stop produce a summary; Reset clears run data and restores
 
 ## Verification
 
-From `web-nuxt/`, `npm test` checks shared configuration, store transitions and power calculations. After building the native executable and running `npm run build`, `npm run test:integration` launches the production server and checks validation, exact credits, pause/resume/speed, graceful Stop, relaunch settings and simulation-time power. Native CTest/Python integration coverage also checks streaming controls and CLI/JSON equivalence.
+From `code/frontend/`, `npm test` checks shared configuration, store transitions and power calculations. After building the native executable and running `npm run build`, `npm run test:integration` launches the production server and checks validation, exact credits, pause/resume/speed, graceful Stop, relaunch settings and simulation-time power. Native CTest/Python integration coverage also checks streaming controls and CLI/JSON equivalence.
 
-Frontend message interfaces live in [`types/simulation.ts`](../web-nuxt/types/simulation.ts); the emitters in `src/simulator.cpp` are authoritative for the full native payload, including exact power parameters and extra terminal counters forwarded by the server.
+Frontend message interfaces live in [`types/simulation.ts`](../code/frontend/types/simulation.ts); the emitters in `code/backend/src/simulator.cpp` are authoritative for the full native payload, including exact power parameters and extra terminal counters forwarded by the server.

@@ -10,7 +10,7 @@ import tempfile
 import threading
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[3]
 BINARY = Path(sys.argv[1]).resolve()
 
 
@@ -18,11 +18,11 @@ def close(a, b):
     assert math.isclose(float(a), float(b), rel_tol=1e-12, abs_tol=1e-9), (a, b)
 
 
-def native(prefix, extra=()):
+def native(prefix, extra=(), cwd=ROOT):
     args = [str(BINARY), "--layers", "3", "--grid-factor", "1", "--redundancy", "none",
             "--cycles", "30", "--seed", "42", "--failure-rate", "0",
             "--request-probability", "0.25", *extra]
-    subprocess.run([*args, "--output", str(prefix)], cwd=ROOT, capture_output=True,
+    subprocess.run([*args, "--output", str(prefix)], cwd=cwd, capture_output=True,
                    text=True, check=True, timeout=30)
     with Path(str(prefix) + "_summary.csv").open() as file:
         summary = {row[0]: row[1] for row in list(csv.reader(file))[1:]}
@@ -37,6 +37,12 @@ def native(prefix, extra=()):
 with tempfile.TemporaryDirectory(prefix="tsvra-integration-") as folder:
     base = Path(folder)
     args, summary, requests, trace, config = native(base / "uniform")
+    # Explicit resource/output paths also work outside the repository cwd.
+    _, outside_summary, outside_requests, _, _ = native(
+        base / "outside-cwd", ["--power-config", str(ROOT / "code/config/power_model.ini")], cwd=base
+    )
+    assert outside_summary == summary
+    assert outside_requests == requests
     stream = subprocess.run([*args, "--json-stream"], cwd=ROOT, input="r", text=True,
                             capture_output=True, check=True, timeout=30)
     messages = [json.loads(line) for line in stream.stdout.splitlines()]
@@ -176,4 +182,4 @@ with tempfile.TemporaryDirectory(prefix="tsvra-integration-") as folder:
     bad = subprocess.run([str(BINARY), "--router-delay", "-1"], cwd=ROOT, capture_output=True, timeout=5)
     assert bad.returncode != 0
 
-print("CLI/JSON parity, drain energy, RNG isolation, failed-hop energy and exact step/stop passed")
+print("Relocated resource paths, CLI/JSON parity, drain energy, RNG isolation, failed-hop energy and exact step/stop passed")

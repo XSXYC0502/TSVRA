@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { readFile, mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
 import ts from 'typescript';
 import { createPinia, setActivePinia } from 'pinia';
@@ -19,6 +21,7 @@ const powerSource = await loadTypeScript('../shared/power.ts');
 const { defaultLaunchConfig, validateLaunchConfig, buildSimulatorArgs, parseHotspotCenters } = configSource.module;
 const { CHART_HISTORY_LIMIT, appendHistory, powerSample } = powerSource.module;
 const { module: formatters } = await loadTypeScript('../utils/formatters.ts');
+const { module: simulatorPaths } = await loadTypeScript('../server/utils/simulatorPaths.ts');
 const { module: storeModule } = await loadTypeScript('../stores/simulation.ts', {
   pinia: import.meta.resolve('pinia'),
   vue: import.meta.resolve('vue'),
@@ -185,4 +188,47 @@ test('preview supports all redundancy layouts and excludes the top layer from ch
   store.initializePreview(3, 2, 'shared');
   assert.equal(store.tsvGrid[0][1][1].redundant, true);
   assert.equal(appendHistory([], new Array(CHART_HISTORY_LIMIT + 10).fill(1)).length, CHART_HISTORY_LIMIT);
+});
+
+test('runtime paths discover the repository from frontend cwd and bundled Nitro modules', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'tsvra-paths-'));
+  try {
+    await mkdir(path.join(root, 'code/config'), { recursive: true });
+    await mkdir(path.join(root, 'code/build/bin'), { recursive: true });
+    await writeFile(path.join(root, 'code/config/power_model.ini'), 'fixture');
+    const executable = process.platform === 'win32' ? 'tsvra.exe' : 'tsvra';
+    const binary = path.join(root, 'code/build/bin', executable);
+    await writeFile(binary, 'fixture');
+    const frontend = path.join(root, 'code/frontend');
+    const bundled = path.join(frontend, '.output/server/chunks/routes');
+    for (const cwd of [root, frontend, os.tmpdir()]) {
+      const location = { cwd, moduleDirectory: bundled, env: {} };
+      assert.equal(simulatorPaths.resolveSimulationRoot(location), root);
+      assert.equal(simulatorPaths.resolveBinPath(location), binary);
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('runtime paths support Windows preset/configuration binaries and explicit overrides', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'tsvra-paths-'));
+  try {
+    await mkdir(path.join(root, 'code/config'), { recursive: true });
+    await writeFile(path.join(root, 'code/config/power_model.ini'), 'fixture');
+    const presetDirectory = path.join(root, 'code/build/windows-msvc/bin/Release');
+    await mkdir(presetDirectory, { recursive: true });
+    const presetBinary = path.join(presetDirectory, 'tsvra.exe');
+    await writeFile(presetBinary, 'fixture');
+    const location = { cwd: root, env: {}, platform: 'win32' };
+    assert.equal(simulatorPaths.resolveBinPath(location), presetBinary);
+    const customBinary = path.join(root, 'custom executable.exe');
+    await writeFile(customBinary, 'fixture');
+    const override = { ...location, env: { TSVRA_ROOT: 'custom-runtime', TSVRA_BIN: 'custom executable.exe' } };
+    assert.equal(simulatorPaths.resolveSimulationRoot(override), path.join(root, 'custom-runtime'));
+    assert.equal(simulatorPaths.resolveBinPath(override), customBinary);
+    assert.equal(simulatorPaths.getCandidateBinPaths(override)[0], customBinary);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });

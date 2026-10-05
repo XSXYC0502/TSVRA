@@ -13,4 +13,4 @@ The reports contain aggregate tables only. They do not retain complete effective
 
 `Correct Rate` is the legacy label for delivery success; it does not establish correctness of the physical model. Current channel accounting, failure handling, traffic settings, router service time, and drain behavior must be checked before comparing these values with new runs. These tables alone do not establish that one redundancy layout is superior, or that layouts are equivalent.
 
-For new results, use [`experiments.py`](../../experiments.py) and [`experiments/example.json`](../../experiments/example.json). The current runner retains batch settings, per-run logs and exports, actual seeds, and aggregate reports. See [the current experiment workflow](../power-model.md#reporting-and-batch-experiments).
+For new results, use [`code/scripts/run_experiments.py`](../../code/scripts/run_experiments.py) and [`code/config/experiments.example.json`](../../code/config/experiments.example.json). The current runner retains batch settings, per-run logs and exports, actual seeds, and aggregate reports. See [the current experiment workflow](../power-model.md#reporting-and-batch-experiments).

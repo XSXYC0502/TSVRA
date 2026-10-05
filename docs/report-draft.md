@@ -25,7 +25,7 @@ During the generation horizon, each cycle generates traffic, updates transmissio
 
 Every launched hop includes link delay plus router service time; contention adds resource waits. New routing and rerouting retain one cycle of dispatch time. Congestion and risk penalties guide route selection, while physical arrival time is tracked separately. Failure probabilities apply to logical 64 bit vertical channels. Uniform and hotspot distributions are independent of traffic hotspot weights, so traffic concentration does not automatically change a channel's failure probability.
 
-The power estimate sums continuous router idle energy and the router/link energy of actual launched hops, including work that later fails and work during drain. The current simulator loads editable coefficients from `power_model.ini`; its router reference is calibrated offline from DSENT evidence. The retained [synthetic power-prediction package](power-model-final/README_final_plan.md) supplies an independent training/prediction workflow and is not invoked by the simulator.
+The power estimate sums continuous router idle energy and the router/link energy of actual launched hops, including work that later fails and work during drain. The current simulator loads editable coefficients from `code/config/power_model.ini`; its router reference is calibrated offline from DSENT evidence. The retained [synthetic power-prediction package](power-model-final/README_final_plan.md) supplies an independent training/prediction workflow and is not invoked by the simulator.
 
 ## Visualization and controls
 
@@ -40,19 +40,19 @@ The repository contains checks for routing and redundancy invariants, request ac
 Run the existing checks from the repository root:
 
 ```bash
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build --parallel
-ctest --test-dir build --output-on-failure
-npm --prefix web-nuxt ci
-npm --prefix web-nuxt test
-npm --prefix web-nuxt run build
-npm --prefix web-nuxt run test:integration
+cmake -S code/backend -B code/build -DCMAKE_BUILD_TYPE=Release
+cmake --build code/build --parallel
+ctest --test-dir code/build --output-on-failure
+npm --prefix code/frontend ci
+npm --prefix code/frontend test
+npm --prefix code/frontend run build
+npm --prefix code/frontend run test:integration
 ```
 
-For a reproducible comparison, edit `experiments/example.json` and run:
+For a reproducible comparison, edit `code/config/experiments.example.json` and run:
 
 ```bash
-python3 experiments.py --config experiments/example.json --jobs 4
+python3 code/scripts/run_experiments.py --config code/config/experiments.example.json --jobs 4
 ```
 
 Before reporting numerical conclusions, retain the batch specification, source revision, effective per-run configurations, actual seeds, raw exports, logs, and aggregation method. State the traffic horizon and whether results include drain. Report delivery success and completed-flit latency alongside hop counts, bypass outcomes, failures, and energy; treat energy per completed flit as undefined when no flit completes. Matched seeds do not guarantee identical request traces across redundancy layouts, because endpoint rejection changes traffic RNG consumption; report that limitation unless a controlled workload is introduced.

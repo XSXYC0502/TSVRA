@@ -8,7 +8,7 @@ This roadmap describes follow-up work for the current codebase. Proposed work be
 - Uniform and fixed Gaussian hotspot failure distributions, separately configured initial/runtime probabilities, geometric runtime lifetimes, and reproducible RNG streams.
 - A common native/JSON simulation loop, completion drain, routing/bypass diagnostics, and energy accounting for actual launched hops and continuous router idle activity.
 - Nuxt visualization with shared launch validation, WebSocket/native lifecycle management, preview geometry for every layout, bounded histories, and pause/step/speed controls.
-- Editable JSON experiment matrices through `experiments.py`, parallel runs, preserved per-run evidence, accounting validation, and aggregate reports.
+- Editable JSON experiment matrices through `code/scripts/run_experiments.py`, parallel runs, preserved per-run evidence, accounting validation, and aggregate reports.
 - Native routing/accounting, failure, and power tests; native CLI/JSON integration checks; web validation/state tests; and a real WebSocket/native integration check.
 - Current model, parameter, architecture, protocol, and calibration documentation. Native link defaults and the web/example link profile intentionally differ; [the parameter reference](hardcoded-parameters.md) explains the profiles.
 

@@ -2,6 +2,8 @@ cmake_minimum_required(VERSION 3.20)
 
 project(TSVRA VERSION 1.0.0 LANGUAGES CXX)
 
+get_filename_component(TSVRA_REPOSITORY_ROOT "${PROJECT_SOURCE_DIR}/../.." ABSOLUTE)
+
 # Set the C++ standard.
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -52,11 +54,11 @@ endfunction()
 
 function(tsvra_set_runtime_output target_name)
     set_target_properties(${target_name} PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}/bin
-        RUNTIME_OUTPUT_DIRECTORY_DEBUG ${PROJECT_SOURCE_DIR}/bin
-        RUNTIME_OUTPUT_DIRECTORY_RELEASE ${PROJECT_SOURCE_DIR}/bin
-        RUNTIME_OUTPUT_DIRECTORY_RELWITHDEBINFO ${PROJECT_SOURCE_DIR}/bin
-        RUNTIME_OUTPUT_DIRECTORY_MINSIZEREL ${PROJECT_SOURCE_DIR}/bin
+        RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
+        RUNTIME_OUTPUT_DIRECTORY_DEBUG ${CMAKE_BINARY_DIR}/bin
+        RUNTIME_OUTPUT_DIRECTORY_RELEASE ${CMAKE_BINARY_DIR}/bin
+        RUNTIME_OUTPUT_DIRECTORY_RELWITHDEBINFO ${CMAKE_BINARY_DIR}/bin
+        RUNTIME_OUTPUT_DIRECTORY_MINSIZEREL ${CMAKE_BINARY_DIR}/bin
     )
 endfunction()
 
@@ -92,10 +94,12 @@ tsvra_set_runtime_output(tsvra)
 enable_testing()
 add_executable(tsvra_tests tests/test_main.cpp)
 target_link_libraries(tsvra_tests PRIVATE tsvra_lib Threads::Threads)
+target_compile_definitions(tsvra_tests PRIVATE
+    TSVRA_TEST_POWER_CONFIG="${TSVRA_REPOSITORY_ROOT}/code/config/power_model.ini")
 tsvra_apply_compile_options(tsvra_tests)
 tsvra_set_runtime_output(tsvra_tests)
 add_test(NAME tsvra_tests COMMAND $<TARGET_FILE:tsvra_tests>)
-set_tests_properties(tsvra_tests PROPERTIES WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+set_tests_properties(tsvra_tests PROPERTIES WORKING_DIRECTORY ${TSVRA_REPOSITORY_ROOT})
 
 foreach(suite failure power)
     add_executable(tsvra_${suite}_tests tests/${suite}_tests.cpp)
@@ -103,12 +107,12 @@ foreach(suite failure power)
     tsvra_apply_compile_options(tsvra_${suite}_tests)
     tsvra_set_runtime_output(tsvra_${suite}_tests)
     add_test(NAME tsvra_${suite}_tests COMMAND $<TARGET_FILE:tsvra_${suite}_tests>)
-    set_tests_properties(tsvra_${suite}_tests PROPERTIES WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+    set_tests_properties(tsvra_${suite}_tests PROPERTIES WORKING_DIRECTORY ${TSVRA_REPOSITORY_ROOT})
 endforeach()
 
 find_package(Python3 COMPONENTS Interpreter QUIET)
 if(Python3_Interpreter_FOUND)
     add_test(NAME tsvra_integration COMMAND ${Python3_EXECUTABLE}
         ${PROJECT_SOURCE_DIR}/tests/integration_tests.py $<TARGET_FILE:tsvra>)
-    set_tests_properties(tsvra_integration PROPERTIES WORKING_DIRECTORY ${PROJECT_SOURCE_DIR} TIMEOUT 120)
+    set_tests_properties(tsvra_integration PROPERTIES WORKING_DIRECTORY ${TSVRA_REPOSITORY_ROOT} TIMEOUT 120)
 endif()

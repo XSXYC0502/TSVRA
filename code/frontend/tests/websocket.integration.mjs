@@ -1,37 +1,66 @@
-// Requires npm run build and a compiled ../bin/tsvra (or TSVRA_BIN).
+// Requires npm run build and the native build under code/build.
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { readFile } from 'node:fs/promises';
+import { readFile, mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import os from 'node:os';
 import { setTimeout as delay } from 'node:timers/promises';
 import WebSocket from 'ws';
 import ts from 'typescript';
 
 const directory = fileURLToPath(new URL('..', import.meta.url));
+const repositoryRoot = path.resolve(directory, '../..');
+const serverEntry = path.join(directory, '.output/server/index.mjs');
 const configSource = await readFile(new URL('../shared/simulationConfig.ts', import.meta.url), 'utf8');
 const configJs = ts.transpileModule(configSource, { compilerOptions: { module: ts.ModuleKind.ESNext } }).outputText;
 const { defaultLaunchConfig } = await import(`data:text/javascript;base64,${Buffer.from(configJs).toString('base64')}`);
-const portProbe = createServer();
-await new Promise((resolve, reject) => { portProbe.once('error', reject); portProbe.listen(0, '127.0.0.1', resolve); });
-const address = portProbe.address();
-assert.ok(address && typeof address !== 'string');
-const port = address.port;
-await new Promise(resolve => portProbe.close(resolve));
-const httpUrl = `http://127.0.0.1:${port}`;
-const wsUrl = `ws://127.0.0.1:${port}/api/_ws`;
 let output = '';
-const server = spawn(process.execPath, ['.output/server/index.mjs'], {
-  cwd: directory,
-  env: { ...process.env, NITRO_HOST: '127.0.0.1', NITRO_PORT: String(port), TSVRA_BIN: process.env.TSVRA_BIN ?? path.resolve(directory, '../bin/tsvra') },
-  stdio: ['ignore', 'pipe', 'pipe'],
-});
-server.stdout.on('data', chunk => { output = (output + chunk).slice(-12000); });
-server.stderr.on('data', chunk => { output = (output + chunk).slice(-12000); });
+const servers = [];
 const sockets = [];
+let runtimeFixture;
 
-async function connectProbe() {
+async function launchServer(cwd, overrides = {}) {
+  const portProbe = createServer();
+  await new Promise((resolve, reject) => { portProbe.once('error', reject); portProbe.listen(0, '127.0.0.1', resolve); });
+  const address = portProbe.address();
+  assert.ok(address && typeof address !== 'string');
+  const port = address.port;
+  await new Promise(resolve => portProbe.close(resolve));
+  const env = { ...process.env, NITRO_HOST: '127.0.0.1', NITRO_PORT: String(port) };
+  // Exercise discovery independently of overrides inherited from the test shell.
+  delete env.TSVRA_BIN;
+  delete env.TSVRA_ROOT;
+  Object.assign(env, overrides);
+  const server = spawn(process.execPath, [serverEntry], { cwd, env, stdio: ['ignore', 'pipe', 'pipe'] });
+  servers.push(server);
+  server.stdout.on('data', chunk => { output = (output + chunk).slice(-12000); });
+  server.stderr.on('data', chunk => { output = (output + chunk).slice(-12000); });
+  const httpUrl = `http://127.0.0.1:${port}`;
+  let available = false;
+  for (let attempt = 0; attempt < 100; attempt++) {
+    try { available = (await fetch(httpUrl)).ok; } catch { /* server booting */ }
+    if (available) break;
+    if (server.exitCode !== null) throw new Error('Nuxt server exited before startup');
+    await delay(50);
+  }
+  assert.equal(available, true, 'Nuxt server startup');
+  return { server, wsUrl: `ws://127.0.0.1:${port}/api/_ws` };
+}
+
+async function closeServer(server) {
+  if (server.exitCode !== null || server.signalCode !== null) return;
+  server.kill('SIGTERM');
+  await new Promise(resolve => {
+    let timer;
+    const finish = () => { clearTimeout(timer); resolve(); };
+    server.once('exit', finish);
+    timer = setTimeout(() => { server.kill('SIGKILL'); resolve(); }, 2000);
+  });
+}
+
+async function connectProbe(wsUrl) {
   const socket = new WebSocket(wsUrl);
   sockets.push(socket);
   const messages = [];
@@ -60,17 +89,13 @@ async function connectProbe() {
 }
 
 try {
-  let available = false;
-  for (let attempt = 0; attempt < 100; attempt++) {
-    try { available = (await fetch(httpUrl)).ok; } catch { /* server booting */ }
-    if (available) break;
-    if (server.exitCode !== null) throw new Error('Nuxt server exited before startup');
-    await delay(50);
-  }
-  assert.equal(available, true, 'Nuxt server startup');
-  const probe = await connectProbe();
+  const frontendServer = await launchServer(directory);
+  const probe = await connectProbe(frontendServer.wsUrl);
   const status = await probe.waitFor(message => message.type === 'status');
   assert.equal(status.binaryAvailable, true);
+  assert.equal(path.basename(status.binaryPath), process.platform === 'win32' ? 'tsvra.exe' : 'tsvra');
+  assert.ok(status.binaryPath.startsWith(path.join(repositoryRoot, 'code/build')));
+  console.log('PASS: production server discovers the relocated native binary from frontend cwd without overrides');
 
   // Invalid configuration does not create a simulator, including JSON null/infinity.
   for (const config of [null, { cycles: null }, { runtimeFailureRate: 2 }, { redundancy: 'bad' }, { failureModel: { type: 'hotspot', centers: [{ x: 0, y: 0, z: 1 }] } }]) {
@@ -109,6 +134,7 @@ try {
   assert.equal(init.powerModel.calibrationStatus, 'dsent_bulk45_reference');
   assert.ok(init.powerModel.parameterSource.startsWith('https://'));
   assert.equal(init.powerModel.frequencyHz, 1e9);
+  assert.ok(init.powerParameters, 'native includes exact coefficients loaded from the relocated power file');
   await delay(50);
   assert.equal(probe.messages.some(message => message.type === 'cycle'), false, 'native starts paused');
   console.log('PASS: native receives explicit delays, redundant layout, Gaussian centers, rate split, seed and power file from web');
@@ -154,6 +180,7 @@ try {
   assert.equal(done.summary.power.energyPerCompletedFlitPj, null);
   console.log('PASS: graceful Stop returns partial summary.power and native process exits');
 
+  let baselineSummary;
   for (const redundancy of ['none', 'shared']) {
     const mark = probe.messages.length;
     const webDefaults = { ...defaultLaunchConfig(), redundancy, cycles: 3, seed: 789, initialFailureRate: 0, runtimeFailureRate: 0, requestProbability: 0 };
@@ -171,16 +198,65 @@ try {
     assert.equal(finalExit.code, 0);
     assert.equal(final.summary.power.elapsedCycles, 3);
     assert.equal(final.summary.totalRequests, 0);
+    if (redundancy === 'shared') baselineSummary = final.summary;
   }
   console.log('PASS: reset/relaunch keeps web V1/H1000/R15, both remaining redundancy layouts, uniform failures and cumulative summaries');
+
+  const smokeConfig = {
+    ...defaultLaunchConfig(), cycles: 3, seed: 789,
+    initialFailureRate: 0, runtimeFailureRate: 0, requestProbability: 0,
+  };
+  async function runSmoke(socketProbe, config, expectedFrequency) {
+    const mark = socketProbe.messages.length;
+    socketProbe.send({ type: 'start', config });
+    const nextInit = await socketProbe.waitFor(message => message.type === 'init', mark);
+    assert.equal(nextInit.powerModel.frequencyHz, expectedFrequency);
+    assert.equal(nextInit.config.actualSeed, config.seed);
+    socketProbe.send({ type: 'ack', count: config.cycles });
+    const result = await socketProbe.waitFor(message => message.type === 'done', mark);
+    const processExit = await socketProbe.waitFor(message => message.type === 'process_exit', mark);
+    assert.equal(processExit.code, 0);
+    assert.equal(result.summary.power.elapsedCycles, config.cycles);
+    assert.equal(result.summary.power.elapsedSeconds, config.cycles / expectedFrequency);
+    return result.summary;
+  }
+
+  await closeServer(frontendServer.server);
+  const rootServer = await launchServer(repositoryRoot);
+  const rootProbe = await connectProbe(rootServer.wsUrl);
+  const rootStatus = await rootProbe.waitFor(message => message.type === 'status');
+  assert.equal(rootStatus.binaryPath, status.binaryPath);
+  const rootSummary = await runSmoke(rootProbe, smokeConfig, 1e9);
+  assert.deepEqual(rootSummary, baselineSummary, 'frontend/root cwd produce identical deterministic native summaries');
+  console.log('PASS: production server launched from repository cwd finds the same binary/configuration and produces identical results');
+  await closeServer(rootServer.server);
+
+  // Distinct frequencies prove that both the runtime root and an explicit
+  // powerConfig path reach the child; a successful launch alone cannot do that.
+  runtimeFixture = await mkdtemp(path.join(os.tmpdir(), 'tsvra-web-runtime-'));
+  await mkdir(path.join(runtimeFixture, 'code/config'), { recursive: true });
+  const originalPower = await readFile(path.join(repositoryRoot, 'code/config/power_model.ini'), 'utf8');
+  const customPower = originalPower.replace(/^frequency_hz\s*=.*$/m, 'frequency_hz = 2000000000');
+  assert.notEqual(customPower, originalPower, 'custom fixture updates the frequency coefficient');
+  await writeFile(path.join(runtimeFixture, 'code/config/power_model.ini'), customPower);
+  await writeFile(path.join(runtimeFixture, 'code/config/reference.ini'), originalPower);
+  const overrideServer = await launchServer(directory, { TSVRA_BIN: status.binaryPath, TSVRA_ROOT: runtimeFixture });
+  const overrideProbe = await connectProbe(overrideServer.wsUrl);
+  const overrideStatus = await overrideProbe.waitFor(message => message.type === 'status');
+  assert.equal(overrideStatus.binaryPath, status.binaryPath);
+  await runSmoke(overrideProbe, smokeConfig, 2e9);
+  const relativeSummary = await runSmoke(overrideProbe, { ...smokeConfig, powerConfig: 'code/config/reference.ini' }, 1e9);
+  assert.deepEqual(relativeSummary, baselineSummary, 'explicit relative power path resolves from TSVRA_ROOT');
+  const absoluteSummary = await runSmoke(overrideProbe, {
+    ...smokeConfig, powerConfig: path.join(repositoryRoot, 'code/config/power_model.ini'),
+  }, 1e9);
+  assert.deepEqual(absoluteSummary, baselineSummary, 'explicit absolute power path overrides the default runtime file');
+  console.log('PASS: TSVRA_BIN/TSVRA_ROOT and explicit relative/absolute power files preserve native launch semantics');
 } catch (error) {
   console.error(output);
   throw error;
 } finally {
   for (const socket of sockets) socket.close();
-  server.kill('SIGTERM');
-  await new Promise(resolve => {
-    if (server.exitCode !== null || server.signalCode !== null) resolve();
-    else { server.once('exit', resolve); setTimeout(resolve, 2000).unref(); }
-  });
+  await Promise.all(servers.map(closeServer));
+  if (runtimeFixture) await rm(runtimeFixture, { recursive: true, force: true });
 }

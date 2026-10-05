@@ -1,6 +1,5 @@
 {
-  "binary": "bin/tsvra",
-  "output_dir": "output/example",
+  "output_dir": "code/output/example",
   "jobs": 4,
   "repetitions": 2,
   "seeds": [42, 43],
@@ -15,7 +14,7 @@
     "router_delay": 15,
     "request_probability": 0.01,
     "max_horizontal_distance": 25,
-    "power_config": "power_model.ini",
+    "power_config": "code/config/power_model.ini",
     "lambda1": 0.0,
     "lambda2": 0.0
   },

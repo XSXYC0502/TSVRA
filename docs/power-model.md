@@ -1,6 +1,6 @@
 # Explicit power model and offline calibration
 
-The simulator estimates energy with an explicit idle term and counters for actual launched hops. It loads editable coefficients from `power_model.ini`; simulation and batch execution need no DSENT installation, training, NumPy, scikit-learn, or model prediction service. The default router coefficients were generated offline using the original MIT DSENT implementation. This is an architectural estimate with documented circuit and geometry assumptions.
+The simulator estimates energy with an explicit idle term and counters for actual launched hops. It loads editable coefficients from `code/config/power_model.ini`; simulation and batch execution need no DSENT installation, training, NumPy, scikit-learn, or model prediction service. The default router coefficients were generated offline using the original MIT DSENT implementation. This is an architectural estimate with documented circuit and geometry assumptions.
 
 The [retained August 2026 power-prediction package](power-model-final/README_final_plan.md) contains a synthetic training dataset and a fitted regressor for a separate research workflow. The simulator does not load its CSV, spreadsheet, or trained model. Its dataset assumptions and saved regression metrics should not be presented as calibration or validation of the runtime coefficients below.
 
@@ -70,16 +70,17 @@ The calibration source is [MIT Graphite's original DSENT 0.9 source](https://git
 
 The checked-in calibration inputs and evidence are:
 
-- `tools/dsent_router.cfg`: full equivalent router configuration and stable output labels;
-- `tools/power_calibration/manifest.json`: source revision, configuration/technology checksums, operating point, and per-sample checksums;
-- `tools/power_calibration/sample_00.txt` through `sample_03.txt`: raw idle and activity outputs;
-- `tools/power_calibration/fit.json`: explicit clock/leakage split, fitted coefficients, samples, reconstruction error, and limitations;
-- `tools/calibrate_power.py`: offline collection and fitting using the Python standard library.
+- `code/config/dsent_router.cfg`: full equivalent router configuration and stable output labels;
+- `code/scripts/power_calibration/manifest.json`: source revision, configuration/technology checksums, operating point, and per-sample checksums;
+- `code/scripts/power_calibration/sample_00.txt` through `sample_03.txt`: raw idle and activity outputs;
+- `code/scripts/power_calibration/fit.json`: explicit clock/leakage split, fitted coefficients, samples, reconstruction error, and limitations;
+- `code/scripts/calibrate_power.py`: offline collection and fitting using the Python standard library.
 
-To regenerate the INI from the captured evidence without downloading or running DSENT:
+To regenerate the INI from the captured evidence without downloading or running DSENT, use a copy of the evidence. The tool also writes `fit.json` into the input evidence directory, so copying it preserves the checked-in record:
 
 ```bash
-python3 tools/calibrate_power.py --input-dir tools/power_calibration --output /tmp/reproduced_power.ini
+cp -R code/scripts/power_calibration /tmp/tsvra-power-replay
+python3 code/scripts/calibrate_power.py --input-dir /tmp/tsvra-power-replay --output /tmp/reproduced_power.ini
 ```
 
 To collect fresh reference outputs, obtain the pinned upstream checkout and build its DSENT core. The path below is only an example; it is outside the active simulator source.
@@ -88,7 +89,7 @@ To collect fresh reference outputs, obtain the pinned upstream checkout and buil
 git clone https://github.com/mit-carbon/Graphite.git /tmp/tsvra-dsent-source
 git -C /tmp/tsvra-dsent-source checkout 1b4bb98f5bfb96ca394b71e7ef3e9e500a1e3997
 make -C /tmp/tsvra-dsent-source/contrib/dsent/dsent-core -j4
-python3 tools/calibrate_power.py \
+python3 code/scripts/calibrate_power.py \
   --dsent-root /tmp/tsvra-dsent-source/contrib/dsent/dsent-core \
   --evidence-dir /tmp/tsvra-power-calibration \
   --output /tmp/reproduced_power.ini
@@ -111,14 +112,14 @@ Normal simulation exports `<prefix>_summary.csv`, `<prefix>_requests.csv`, `<pre
 
 Energy per completed flit is `all modeled energy / completed flits`; idle energy and unsuccessful traffic stay in its numerator. With zero completions it is undefined: JSON uses `null`, CSV uses an empty field, and reports show `—`. Average latency is defined only for completed flits. Power remains defined for a nonzero idle simulation.
 
-Edit `experiments/example.json`, then run:
+Edit `code/config/experiments.example.json`, then run:
 
 ```bash
-python3 experiments.py --dry-run
-python3 experiments.py
+python3 code/scripts/run_experiments.py --dry-run
+python3 code/scripts/run_experiments.py
 ```
 
-The editable file defines `binary`, `output_dir`, `jobs`, `repetitions`, `seeds`, optional `timeout_seconds`, shared `defaults`, and `configurations`. Each named configuration supplies `parameters` and an optional `matrix`; all combinations of its matrix arrays are run. Configuration-level `repetitions` and `seeds` override the shared values. The first `repetitions` seeds are used, so supply enough seeds. Seed 0 requests a random seed, which is exported as `actual_seed`. Paths in settings are relative to the repository; absolute paths also work. `--binary`, `--output-dir`, and `--jobs` override those settings for one invocation.
+The editable file defines `output_dir`, `jobs`, `repetitions`, `seeds`, shared `defaults`, and `configurations`, with optional `binary` and `timeout_seconds`. Without a binary override, the runner selects the platform executable in `code/build/bin/`, then the MSVC or MinGW build on Windows. Each named configuration supplies `parameters` and an optional `matrix`; all combinations of its matrix arrays are run. Configuration-level `repetitions` and `seeds` override the shared values. The first `repetitions` seeds are used, so supply enough seeds. Seed 0 requests a random seed, which is exported as `actual_seed`. Configuration-file paths and paths inside settings are relative to the repository; absolute paths also work. `--binary`, `--output-dir`, and `--jobs` override those settings for one invocation.
 
 Use simulation JSON names such as `num_layers`, `simulation_cycles`, `router_delay`, `failure_model`, `hotspot_count`, `hotspot_radius`, and `hotspot_multiplier`. Explicit centers can be integer triples, for example `"hotspot_centers": [[6,6,0]]`. `failure_rate` sets both initial and runtime probabilities; the specific `initial_failure_rate` and `runtime_failure_rate` controls override the corresponding value. `failure_mode` selects which stages use those probabilities. The example compares uniform and hotspot failures at two rates and two layer counts, with two seeds per point: 16 runs.
 

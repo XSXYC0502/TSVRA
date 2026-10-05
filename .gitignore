@@ -40,9 +40,8 @@
 # debug information files
 *.dwo
 
-bin/
-build/
-output/
+/code/build/
+/code/output/
 *_summary.csv
 *_requests.csv
 *_power.csv
@@ -53,6 +52,3 @@ __pycache__/
 node_modules
 .nuxt
 .output
-
-refine-logs/
-experiment-results/

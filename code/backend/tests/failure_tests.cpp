@@ -62,7 +62,8 @@ bool defaults_and_legacy_probability() {
     ASSERT_EQ(cfg.get_horizontal_delay(), 500U);
     ASSERT_EQ(cfg.get_router_delay(), 15U);
     ASSERT_EQ(cfg.get_request_probability(), 0.5);
-    ASSERT_EQ(cfg.get_power_config(), "power_model.ini");
+    ASSERT_EQ(cfg.get_power_config(), "code/config/power_model.ini");
+    ASSERT_EQ(cfg.get_output_prefix(), "code/output/tsvra_output");
     cfg.set_failure_rate(0.2);
     ASSERT_EQ(cfg.get_initial_failure_rate(), 0.2);
     ASSERT_EQ(cfg.get_runtime_failure_rate(), 0.2);

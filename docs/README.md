@@ -13,7 +13,7 @@ Start with the repository [README](../README.md) for build and run commands. The
 | [Runtime power model](power-model.md) | Event/idle accounting, calibration evidence, units, and batch experiments |
 | [Web visualization](web-visualization.md) | Native JSON stream, WebSocket messages, state, and playback controls |
 | [Three.js notes](threejs-instancedmesh-notes.md) | Instanced rendering guidance |
-| [Windows run guide](../HOW_TO_RUN_PROJECT_UNDER_WINDOWS.md) | MSVC/MinGW builds and Windows troubleshooting |
+| [Windows run guide](windows.md) | MSVC/MinGW builds and Windows troubleshooting |
 | [Roadmap](roadmap.md) | Implemented capabilities and proposed follow-up work |
 | [Report draft](report-draft.md) | Implementation-based prose for a project report and guidance on supporting results |
 
@@ -22,4 +22,4 @@ Start with the repository [README](../README.md) for build and run commands. The
 - [Power-prediction package](power-model-final/README_final_plan.md): the August 2026 synthetic dataset, spreadsheet, trained regression model, training/prediction scripts, and evaluation outputs. It is a separate research workflow; the simulator uses the runtime power model described above.
 - [Historical experiment reports](historical-results/README.md): earlier failure-rate/layer and horizontal-distance-cap tables, with their evidence limits explained.
 
-The runtime calibration source revision, raw DSENT outputs, and fitting record remain in [`tools/power_calibration/`](../tools/power_calibration/). The retained package's `data/dataset_manifest.json` describes its dataset; the runtime calibration's `manifest.json` records calibration inputs. Neither is an inventory of this documentation directory.
+The runtime calibration source revision, raw DSENT outputs, and fitting record remain in [`code/scripts/power_calibration/`](../code/scripts/power_calibration/). The retained package's `data/dataset_manifest.json` describes its dataset; the runtime calibration's `manifest.json` records calibration inputs. Neither is an inventory of this documentation directory.

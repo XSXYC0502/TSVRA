@@ -10,6 +10,8 @@
 #include <cstdlib>
 #include <cmath>
 #include <algorithm>
+#include <chrono>
+#include <filesystem>
 
 // ============================================================
 // Simple test framework
@@ -98,6 +100,31 @@ static void run_test(const char* name, bool (*test_fn)()) {
 // ============================================================
 // Helper: build a minimal Config
 // ============================================================
+class TestOutputDirectory {
+public:
+    TestOutputDirectory() {
+        const auto root = std::filesystem::temp_directory_path();
+        const auto timestamp = std::chrono::steady_clock::now().time_since_epoch().count();
+        for (uint64_t attempt = 0; ; ++attempt) {
+            path_ = root / ("tsvra-native-tests-" + std::to_string(timestamp) + "-" + std::to_string(attempt));
+            if (std::filesystem::create_directory(path_)) break;
+        }
+    }
+
+    ~TestOutputDirectory() {
+        std::error_code error;
+        std::filesystem::remove_all(path_, error);
+    }
+
+    std::string next_prefix() {
+        return (path_ / ("run-" + std::to_string(++sequence_))).string();
+    }
+
+private:
+    std::filesystem::path path_;
+    uint64_t sequence_ = 0;
+};
+
 static tsvra::Config make_config(
     uint32_t layers = 3,
     uint32_t grid_factor = 1,
@@ -107,6 +134,7 @@ static tsvra::Config make_config(
     tsvra::FailureMode fmode = tsvra::FailureMode::INITIAL_ONLY,
     double frate = 1e-5
 ) {
+    static TestOutputDirectory outputs;
     tsvra::Config cfg;
     cfg.set_num_layers(layers);
     cfg.set_grid_factor(grid_factor);
@@ -115,6 +143,8 @@ static tsvra::Config make_config(
     cfg.set_redundancy_layout(layout);
     cfg.set_failure_mode(fmode);
     cfg.set_failure_rate(frate);
+    cfg.set_power_config(TSVRA_TEST_POWER_CONFIG);
+    cfg.set_output_prefix(outputs.next_prefix());
     return cfg;
 }
 // ============================================================
@@ -858,7 +888,6 @@ int main() {
               << " passed, " << tests_failed << " failed ===\n";
     return tests_failed > 0 ? 1 : 0;
 }
-
 
 
 

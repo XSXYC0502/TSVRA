@@ -16,10 +16,10 @@ import subprocess
 import sys
 from pathlib import Path
 
-PROJECT = Path(__file__).resolve().parents[1]
+CODE_ROOT = Path(__file__).resolve().parents[1]
 REVISION = "1b4bb98f5bfb96ca394b71e7ef3e9e500a1e3997"
 SOURCE = f"https://github.com/mit-carbon/Graphite/tree/{REVISION}/contrib/dsent/dsent-core"
-CONFIG = PROJECT / "tools" / "dsent_router.cfg"
+CONFIG = CODE_ROOT / "config" / "dsent_router.cfg"
 RATES = (0.0, 0.08, 0.16, 0.32)
 LABELS = ("event_rate_hz", "buffer_w", "crossbar_w", "control_w", "clock_w", "leakage_w", "total_w")
 
@@ -200,8 +200,8 @@ def write_ini(path: Path, report: dict) -> None:
         "redundant_vertical_capacitance_multiplier": 1.0,
     }
     lines = [
-        "# Generated OFFLINE by tools/calibrate_power.py; editable simulation inputs.",
-        "# Full evidence: tools/power_calibration/manifest.json and fit.json.",
+        "# Generated OFFLINE by code/scripts/calibrate_power.py; editable simulation inputs.",
+        "# Full evidence: code/scripts/power_calibration/manifest.json and fit.json.",
         "# Router is actual DSENT Bulk45LVT at 340 K; it is not the SOI45 paper validation router.",
         f"# Router idle: clock={report['router_clock_mw']:.10g} mW + DSENT leakage={report['router_leakage_mw']:.10g} mW.",
         "# Horizontal length 1000 um is a declared nominal geometry assumption.",
@@ -223,8 +223,8 @@ def main() -> int:
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument("--dsent-root", type=Path, help="Built pinned contrib/dsent/dsent-core directory")
     source.add_argument("--input-dir", type=Path, help="Import previously captured idle+activity evidence")
-    parser.add_argument("--evidence-dir", type=Path, default=PROJECT / "tools" / "power_calibration")
-    parser.add_argument("--output", type=Path, default=PROJECT / "power_model.ini")
+    parser.add_argument("--evidence-dir", type=Path, default=CODE_ROOT / "scripts" / "power_calibration")
+    parser.add_argument("--output", type=Path, default=CODE_ROOT / "config" / "power_model.ini")
     args = parser.parse_args()
     evidence = args.input_dir.resolve() if args.input_dir else args.evidence_dir.resolve()
     try:

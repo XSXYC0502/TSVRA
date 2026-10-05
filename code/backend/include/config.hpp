@@ -154,7 +154,7 @@ private:
     double request_probability_;
     std::string power_config_;
     uint64_t simulation_cycles_;    // Number of simulation cycles, default 100000 (literature minimum requirement)
-    std::string output_prefix_;     // Output file prefix, default "tsvra_output"
+    std::string output_prefix_;     // Output file prefix, default "code/output/tsvra_output"
     uint32_t random_seed_;          // Random seed, 0 means use random device
     double lambda1_;                // Congestion weight (λ1), default 0.0
     double lambda2_;                // Risk weight (λ2), default 0.0
