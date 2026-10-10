@@ -814,6 +814,54 @@ bool test_e2e_deterministic_with_fixed_seed() {
     ASSERT_EQ(r1, r2);
     return true;
 }
+
+bool test_e2e_resource_waits_and_terminal_records() {
+    auto cfg = make_config(2, 1, 30, 42, tsvra::RedundancyLayout::NONE,
+        tsvra::FailureMode::INITIAL_ONLY, 0.0);
+    cfg.set_request_probability(1.0);
+    cfg.set_horizontal_delay(20);
+    tsvra::Simulator sim(cfg);
+    sim.initialize();
+    sim.run();
+    const auto& stats = sim.get_statistics();
+    ASSERT_EQ(stats.get_total_requests(), 30U);
+    ASSERT_EQ(stats.get_completed_requests(), 30U);
+    ASSERT_EQ(stats.get_failed_requests(), 0U);
+    ASSERT_EQ(stats.get_in_flight(), 0U);
+    ASSERT_GT(stats.get_in_flight_at_horizon(), 0U);
+    ASSERT_GT(stats.get_power().elapsed_cycles, cfg.get_simulation_cycles());
+    std::set<uint64_t> ids;
+    uint64_t horizontal = 0, vertical = 0, latency = 0;
+    bool waited = false;
+    for (const auto& req : stats.get_completed_requests_list()) {
+        ASSERT_TRUE(ids.insert(req.id).second);
+        ASSERT_EQ(req.get_latency(), req.complete_time - req.generate_time);
+        ASSERT_TRUE(req.get_current_position() == req.end);
+        uint64_t path_horizontal = 0, path_vertical = 0;
+        for (size_t i = 1; i < req.path.size(); ++i) {
+            const auto& before = req.path[i - 1];
+            const auto& after = req.path[i];
+            const auto planar = static_cast<uint64_t>(std::abs(after.x - before.x) + std::abs(after.y - before.y));
+            const auto dz = static_cast<uint64_t>(std::abs(after.z - before.z));
+            ASSERT_EQ(planar + dz, 1U);
+            path_horizontal += planar;
+            path_vertical += dz;
+        }
+        const uint64_t no_wait_latency = 1 + 35 * path_horizontal + 20 * path_vertical;
+        ASSERT_GE(req.get_latency(), no_wait_latency);
+        if (req.get_latency() > no_wait_latency) waited = true;
+        ASSERT_EQ(req.horizontal_distance, path_horizontal);
+        horizontal += path_horizontal;
+        vertical += path_vertical;
+        latency += req.get_latency();
+    }
+    ASSERT_TRUE(waited);
+    ASSERT_EQ(stats.get_power().horizontal_hops, horizontal);
+    ASSERT_EQ(stats.get_power().vertical_hops, vertical);
+    ASSERT_EQ(stats.get_power().router_events, horizontal + vertical);
+    ASSERT_EQ(stats.get_average_latency(), static_cast<double>(latency) / 30.0);
+    return true;
+}
 // ============================================================
 // main
 // ============================================================
@@ -883,6 +931,7 @@ int main() {
     run_test("e2e_combined_failure_mode",      test_e2e_combined_failure_mode);
     run_test("e2e_legacy_corner4_layout",      test_e2e_legacy_corner4_layout);
     run_test("e2e_deterministic_fixed_seed",   test_e2e_deterministic_with_fixed_seed);
+    run_test("e2e_resource_waits_and_terminal_records", test_e2e_resource_waits_and_terminal_records);
 
     std::cout << "\n=== Results: " << tests_passed << "/" << tests_run
               << " passed, " << tests_failed << " failed ===\n";

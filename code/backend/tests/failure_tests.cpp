@@ -107,9 +107,16 @@ bool cli_validation_and_aliases() {
     ASSERT_TRUE(rejects({"tsvra", "--layers", "2abc"}));
     ASSERT_TRUE(rejects({"tsvra", "--seed", "4294967296"}));
     ASSERT_TRUE(rejects({"tsvra", "--request-probability", "1.2"}));
+    ASSERT_TRUE(rejects({"tsvra", "--initial-failure-rate", "-0.01"}));
+    ASSERT_TRUE(rejects({"tsvra", "--initial-failure-rate", "1.01"}));
+    ASSERT_TRUE(rejects({"tsvra", "--runtime-failure-rate", "nan"}));
+    ASSERT_TRUE(rejects({"tsvra", "--runtime-failure-rate", "1.01"}));
     ASSERT_TRUE(rejects({"tsvra", "--hotspot-radius", "0"}));
     ASSERT_TRUE(rejects({"tsvra", "--hotspot-multiplier", "0.5"}));
     ASSERT_TRUE(rejects({"tsvra", "--hotspot-centers", "0,0,2"}));
+    ASSERT_TRUE(rejects({"tsvra", "--hotspot-centers", "-1,0,0"}));
+    ASSERT_TRUE(rejects({"tsvra", "--hotspot-centers", "4,0,0"}));
+    ASSERT_TRUE(rejects({"tsvra", "--hotspot-centers", "0,4,0"}));
     ASSERT_TRUE(rejects({"tsvra", "--hotspot-centers", "0,0,0;"}));
     ASSERT_TRUE(rejects({"tsvra", "--hotspot-centers", "0,0,0,1"}));
     cfg.set_lambda1(std::numeric_limits<double>::quiet_NaN());
@@ -172,6 +179,138 @@ bool fixed_normalized_maps_and_interface_locality() {
     ASSERT_EQ(grid.get_probability_map(false), initial);
     ASSERT_EQ(grid.get_probability_map(true), runtime);
     ASSERT_NEAR(mean(grid.get_probability_map(true)), 0.2, 1e-14);
+    return true;
+}
+
+bool planned_probability_matrix_and_geometry() {
+    const std::vector<double> rates{0.05, 0.10, 0.15, 0.20, 0.25, 0.30,
+        0.35, 0.40, 0.45, 0.50, 0.60, 0.70};
+    const std::vector<std::vector<tsvra::Point>> scenarios{
+        {}, {{5, 5, 0}}, {{10, 10, 0}}, {{5, 5, 0}, {10, 10, 0}}};
+    for (uint32_t layers = 2; layers <= 5; ++layers) {
+        for (const double rate : rates) for (const auto& centers : scenarios) {
+            auto cfg = config(layers, 4);
+            cfg.set_redundancy_layout(tsvra::RedundancyLayout::SHARED_SPARE);
+            cfg.set_failure_mode(tsvra::FailureMode::INITIAL_ONLY);
+            cfg.set_initial_failure_rate(rate);
+            cfg.set_runtime_failure_rate(0.0);
+            cfg.set_failure_model(centers.empty() ? tsvra::FailureModel::UNIFORM : tsvra::FailureModel::HOTSPOT);
+            cfg.set_hotspot_count(static_cast<uint32_t>(std::max(size_t{1}, centers.size())));
+            cfg.set_hotspot_centers(centers);
+            cfg.set_hotspot_radius(3.0);
+            cfg.set_hotspot_multiplier(5.0);
+            ASSERT_TRUE(cfg.validate());
+            tsvra::Grid grid(cfg), other_seed(cfg);
+            initialize(grid, 101);
+            initialize(other_seed, 130);
+            ASSERT_EQ(grid.get_total_tsvs(), 256U * (layers - 1));
+            ASSERT_EQ(grid.get_total_redundant_tsvs(), 25U * (layers - 1));
+            ASSERT_EQ(grid.get_spare_sites().size(), 25U * (layers - 1));
+            ASSERT_EQ(grid.get_hotspot_centers(), centers);
+            ASSERT_EQ(grid.get_probability_map(false), other_seed.get_probability_map(false));
+            ASSERT_NEAR(mean(grid.get_probability_map(false)), rate, 1e-12);
+            ASSERT_EQ(mean(grid.get_probability_map(true)), 0.0);
+            ASSERT_EQ(grid.get_pending_runtime_failures(), 0U);
+            ASSERT_TRUE(!grid.get_tsv(5, 5, 0)->is_redundant());
+            ASSERT_TRUE(grid.get_tsv(10, 10, 0)->is_redundant());
+
+            // Recover the common scale from an unsaturated distant channel.
+            // Check the declared Gaussian maximum at every cell, including
+            // overlapping H12 tails and interfaces without a center.
+            const auto weight = [&](int x, int y, uint32_t z) {
+                double gaussian = 0.0;
+                for (const auto& center : centers) if (static_cast<uint32_t>(center.z) == z) {
+                    const double squared_distance = static_cast<double>(
+                        (x - center.x) * (x - center.x) + (y - center.y) * (y - center.y));
+                    gaussian = std::max(gaussian, std::exp(-squared_distance / 18.0));
+                }
+                return 1.0 + 4.0 * gaussian;
+            };
+            const double distant = grid.get_failure_probability(15, 0, 0, false);
+            ASSERT_TRUE(distant < 1.0);
+            const double scale = distant / weight(15, 0, 0);
+            size_t saturated = 0;
+            uint64_t nodes = 0;
+            for (uint32_t z = 0; z < layers; ++z) {
+                size_t interface_spares = 0;
+                for (int y = 0; y < 16; ++y) for (int x = 0; x < 16; ++x) {
+                    const auto* node = grid.get_tsv(x, y, static_cast<int32_t>(z));
+                    ASSERT_TRUE(node != nullptr);
+                    ++nodes;
+                    if (node->is_redundant()) ++interface_spares;
+                    if (z + 1 == layers) {
+                        ASSERT_TRUE(!node->is_failed() && !node->is_redundant());
+                        ASSERT_TRUE(!grid.is_valid_channel(x, y, static_cast<int32_t>(z)));
+                        ASSERT_EQ(grid.get_failure_probability(x, y, static_cast<int32_t>(z), false), 0.0);
+                        continue;
+                    }
+                    const double probability = grid.get_failure_probability(x, y, static_cast<int32_t>(z), false);
+                    ASSERT_TRUE(std::isfinite(probability) && probability >= 0.0 && probability <= 1.0);
+                    ASSERT_NEAR(probability, std::min(1.0, scale * weight(x, y, z)), 1e-12);
+                    if (probability == 1.0) ++saturated;
+                    if (centers.empty()) ASSERT_NEAR(probability, rate, 1e-12);
+                    if (z > 0) ASSERT_EQ(probability, grid.get_failure_probability(0, 0, static_cast<int32_t>(z), false));
+                }
+                ASSERT_EQ(interface_spares, z + 1 < layers ? 25U : 0U);
+            }
+            ASSERT_EQ(nodes, 256U * layers);
+            if (!centers.empty() && rate == 0.70) ASSERT_TRUE(saturated > 0);
+            const auto frozen = grid.get_probability_map(false);
+            const auto runtime = grid.get_probability_map(true);
+            grid.get_tsv(0, 0, 0)->set_failed(!grid.get_tsv(0, 0, 0)->is_failed());
+            grid.apply_runtime_failure(10000);
+            ASSERT_EQ(grid.get_probability_map(false), frozen);
+            ASSERT_EQ(grid.get_probability_map(true), runtime);
+        }
+    }
+    return true;
+}
+
+bool explicit_routing_and_spare_fixtures() {
+    auto cfg = config(3, 4);
+    cfg.set_redundancy_layout(tsvra::RedundancyLayout::SHARED_SPARE);
+    tsvra::Grid grid(cfg);
+    initialize(grid);
+    tsvra::Router router(grid, cfg);
+    const auto valid_route = [&](const tsvra::Point& start, const tsvra::Point& end) {
+        const auto result = router.route(start, end, 0, 0, 1);
+        if (!result || result->first.front() != start || result->first.back() != end) return false;
+        uint64_t horizontal = 0, vertical = 0;
+        for (size_t i = 1; i < result->first.size(); ++i) {
+            const auto& from = result->first[i - 1];
+            const auto& to = result->first[i];
+            if (!grid.is_valid_position(to.x, to.y, to.z)) return false;
+            const int planar = std::abs(to.x - from.x) + std::abs(to.y - from.y);
+            const int dz = std::abs(to.z - from.z);
+            if (planar + dz != 1) return false;
+            if (dz) {
+                const auto* channel = grid.get_vertical_channel(from, to);
+                if (!channel || channel->is_failed()) return false;
+                ++vertical;
+            } else ++horizontal;
+        }
+        return result->second == 1 + 20 * vertical + 515 * horizontal;
+    };
+    ASSERT_TRUE(valid_route({5, 5, 0}, {5, 5, 2}));
+    ASSERT_TRUE(valid_route({5, 5, 0}, {7, 6, 2}));
+    grid.get_tsv(0, 0, 0)->set_failed(true);
+    ASSERT_TRUE(valid_route({0, 0, 0}, {0, 0, 2}));
+    const auto spare = grid.find_bypass_spare({0, 0, 0}, 0);
+    ASSERT_TRUE(spare && *spare == tsvra::Point(1, 1, 0));
+    grid.get_tsv(1, 1, 0)->occupy_until(100);
+    ASSERT_TRUE(!grid.find_bypass_spare({0, 0, 0}, 99));
+    ASSERT_TRUE(grid.find_bypass_spare({0, 0, 0}, 100).has_value());
+    grid.get_tsv(1, 1, 0)->set_failed(true);
+    ASSERT_TRUE(!grid.find_bypass_spare({0, 0, 0}, 100));
+    // Unavailable local redundancy still permits an ordinary healthy alternative.
+    ASSERT_TRUE(valid_route({0, 0, 0}, {0, 0, 2}));
+    cfg.set_max_path_length(2);
+    ASSERT_TRUE(!router.route({0, 0, 0}, {0, 0, 2}, 0, 0, 1));
+    cfg.set_max_path_length(0);
+    for (int y = 0; y < 16; ++y) for (int x = 0; x < 16; ++x) grid.get_tsv(x, y, 1)->set_failed(true);
+    ASSERT_TRUE(!router.route({0, 0, 0}, {0, 0, 2}, 0, 0, 1));
+    ASSERT_TRUE(!router.route({0, 0, 2}, {0, 0, 0}, 0, 0, 1));
+    ASSERT_TRUE(valid_route({0, 0, 2}, {1, 0, 2}));
     return true;
 }
 
@@ -417,6 +556,8 @@ int main() {
         {"cli_validation_and_aliases", cli_validation_and_aliases},
         {"ini_values_and_cli_precedence", ini_values_and_cli_precedence},
         {"fixed_normalized_maps_and_interface_locality", fixed_normalized_maps_and_interface_locality},
+        {"planned_probability_matrix_and_geometry", planned_probability_matrix_and_geometry},
+        {"explicit_routing_and_spare_fixtures", explicit_routing_and_spare_fixtures},
         {"gaussian_max_and_extreme_multiplier", gaussian_max_and_extreme_multiplier},
         {"deterministic_centers_and_streams", deterministic_centers_and_streams},
         {"zero_one_absorbing_failures_and_top_layer", zero_one_absorbing_failures_and_top_layer},

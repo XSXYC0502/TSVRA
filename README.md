@@ -85,6 +85,18 @@ python3 code/scripts/run_experiments.py --config code/config/experiments.example
 
 The runner uses the Python standard library, preserves per-run outputs and aggregates reproducible comparisons. `--jobs 1` runs sequentially.
 
+The approved [experiment study](docs/experiment-plan.md) has explicit pilot and main configurations (156 and 3,960 runs). The runner rejects an occupied output directory, preserves operational failures, audits full drain/request/energy accounting, and records resolved commands, hashes, resources and toolchain provenance. Use a fresh directory when reproducing a stage:
+
+```bash
+python3 code/scripts/run_experiments.py --config code/config/experiments.pilot.json --dry-run
+python3 code/scripts/run_experiments.py --config code/config/experiments.pilot.json --jobs 1 --output-dir code/output/reproduction/pilot
+python3 code/scripts/review_pilot.py --pilot-dir code/output/reproduction/pilot
+python3 code/scripts/run_experiments.py --config code/config/experiments.main.json --jobs 4 --timeout-seconds 30 --output-dir code/output/reproduction/main
+python3 code/scripts/analyze_experiments.py --results-dir code/output/reproduction/main --bootstrap-seed 20261009
+```
+
+Review pilot suitability before the main command; choose concurrency and timeout from measurements. Analysis uses NumPy and Matplotlib ([dependency file](code/scripts/requirements-analysis.txt)), resamples whole seed runs, verifies matched traffic before hotspot contrasts, and exports request/run/cell tables and standalone figures. CSV blanks and JSON nulls remain undefined. Run the batch, analysis and pilot-review fixtures with `python3 -m unittest discover -s code/scripts -p 'test_*.py'`. The canonical plan records the actual execution commands and evidence locations.
+
 ## Editing the code
 
 | Location | Contents |

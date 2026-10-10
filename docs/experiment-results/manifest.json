@@ -1,0 +1,158 @@
+{
+  "schema_version": 1,
+  "study": "experiment-study-20261009",
+  "source_root": "repository root",
+  "scope": "Byte-identical copies for the standalone report; original raw bundle retained in code/output.",
+  "files": {
+    "figures/delivery_vs_failure.png": {
+      "source": "code/output/experiment-study-20261009/main/analysis/figures/delivery_vs_failure.png",
+      "bytes": 89145,
+      "sha256": "107e0aaca425b35febd1b0f85991ca7e146d298429a6972f54a5473b08d2108d"
+    },
+    "figures/delivery_vs_failure.pdf": {
+      "source": "code/output/experiment-study-20261009/main/analysis/figures/delivery_vs_failure.pdf",
+      "bytes": 28599,
+      "sha256": "44094c868fa3e4e3e1ff8020b2639bb65119fcc011cc8784bba1fa3dde4864ef"
+    },
+    "figures/latency_vs_failure.png": {
+      "source": "code/output/experiment-study-20261009/main/analysis/figures/latency_vs_failure.png",
+      "bytes": 308419,
+      "sha256": "2b0bf52540aee885a8876e921529ef91aef8ac95051f92041361a2894f294b36"
+    },
+    "figures/latency_vs_failure.pdf": {
+      "source": "code/output/experiment-study-20261009/main/analysis/figures/latency_vs_failure.pdf",
+      "bytes": 34176,
+      "sha256": "11d3dde27a9ecc88c651d1780b874fb8f42a26a630b4a3d071908eaf4a2135fd"
+    },
+    "figures/contrast_average_latency_cycles.png": {
+      "source": "code/output/experiment-study-20261009/main/analysis/figures/contrast_average_latency_cycles.png",
+      "bytes": 265637,
+      "sha256": "072d66ea6c6b3c87d2e8418319cfd92b4da68d67bc10923053b3012b6a0dd3e8"
+    },
+    "figures/contrast_average_latency_cycles.pdf": {
+      "source": "code/output/experiment-study-20261009/main/analysis/figures/contrast_average_latency_cycles.pdf",
+      "bytes": 31107,
+      "sha256": "8b4d03f3d1dd45a5f160dea6f13d47f7ad1f9c28ef95c29e484df96aca9a0aaa"
+    },
+    "figures/power_event_components.png": {
+      "source": "code/output/experiment-study-20261009/main/analysis/figures/power_event_components.png",
+      "bytes": 219685,
+      "sha256": "bf0851fb740b1f6d8fda90cfce46fa33a088da9aa4aacca2b006434bf68be607"
+    },
+    "figures/power_event_components.pdf": {
+      "source": "code/output/experiment-study-20261009/main/analysis/figures/power_event_components.pdf",
+      "bytes": 27328,
+      "sha256": "decf53c876bf15196a7ca41cbe533553440a50eeb0337d470d7985bf6f8ddd47"
+    },
+    "figures/energy_per_completion.png": {
+      "source": "code/output/experiment-study-20261009/main/analysis/figures/energy_per_completion.png",
+      "bytes": 277779,
+      "sha256": "2ce4daecc844985b5f90d88e9d0162abac2c353e70b35090833d94af6f976c04"
+    },
+    "figures/energy_per_completion.pdf": {
+      "source": "code/output/experiment-study-20261009/main/analysis/figures/energy_per_completion.pdf",
+      "bytes": 34866,
+      "sha256": "a6126fe2c7361bb776e35d4c70ebc8f16650ed39021f53cbccb50288d226d056"
+    },
+    "figures/probability_maps_L5_f70.png": {
+      "source": "code/output/experiment-study-20261009/main/analysis/figures/probability_maps_L5_f70.png",
+      "bytes": 149017,
+      "sha256": "e5d42d2b773f8651631d10a3cae955ae8c551f109c499af406ad3e915a07d2f9"
+    },
+    "figures/probability_maps_L5_f70.pdf": {
+      "source": "code/output/experiment-study-20261009/main/analysis/figures/probability_maps_L5_f70.pdf",
+      "bytes": 56346,
+      "sha256": "180eacfa570ca06ff0fcc4493374ad25e4fd18f71d5b56a349e8e911b3652e6e"
+    },
+    "figures/horizontal_activity.png": {
+      "source": "code/output/experiment-study-20261009/main/analysis/figures/horizontal_activity.png",
+      "bytes": 287452,
+      "sha256": "b57db2a54cd790a1b835a123c9831fb79658eedf87fc4c72c53702e4a13bf951"
+    },
+    "figures/horizontal_activity.pdf": {
+      "source": "code/output/experiment-study-20261009/main/analysis/figures/horizontal_activity.pdf",
+      "bytes": 34260,
+      "sha256": "43a9c5caf6a62b9dec9a125c2b0bccbfee9d153bd0ef9821c6e905e52aa4e331"
+    },
+    "figures/spare_activity.png": {
+      "source": "code/output/experiment-study-20261009/main/analysis/figures/spare_activity.png",
+      "bytes": 278588,
+      "sha256": "b9657f003be7a6ca0cfe56c8018ebfd9a11d2b1a76dd3020d56bb08083aa383d"
+    },
+    "figures/spare_activity.pdf": {
+      "source": "code/output/experiment-study-20261009/main/analysis/figures/spare_activity.pdf",
+      "bytes": 33651,
+      "sha256": "8f2cc7313f6336c363bc9308f2370d90a54bb1dd8703843ebfd13e317bf251b4"
+    },
+    "figures/observed_vs_configured.png": {
+      "source": "code/output/experiment-study-20261009/main/analysis/figures/observed_vs_configured.png",
+      "bytes": 191446,
+      "sha256": "1f8a9d30657fb0a071df0fc93381194edb57fe5122f38390d82d11062cdb0f7d"
+    },
+    "figures/observed_vs_configured.pdf": {
+      "source": "code/output/experiment-study-20261009/main/analysis/figures/observed_vs_configured.pdf",
+      "bytes": 33330,
+      "sha256": "8473fc43e0edfeea3d54a7e8ad576a1f6f016d0ab0dd670e1fbe62ec6191e177"
+    },
+    "figures/delivery_by_latency_L3.png": {
+      "source": "code/output/experiment-study-20261009/main/analysis/figures/delivery_by_latency_L3.png",
+      "bytes": 268707,
+      "sha256": "758994c7cb144333a0fa3725ccdf6fb4b63ea0c735d4ac6eee9d618e8a9a8426"
+    },
+    "figures/delivery_by_latency_L3.pdf": {
+      "source": "code/output/experiment-study-20261009/main/analysis/figures/delivery_by_latency_L3.pdf",
+      "bytes": 76742,
+      "sha256": "92eea76077110a4c82f2412e0be455f191000c70842283dd57ff9e38cd89df91"
+    },
+    "tables/summary_readable.csv": {
+      "source": "code/output/experiment-study-20261009/main/analysis/summary_readable.csv",
+      "bytes": 74536,
+      "sha256": "e934b12e6730987ad1df31d83abdb99a29ef72997a8d30ddf5b0686dc6982117"
+    },
+    "tables/summary.csv": {
+      "source": "code/output/experiment-study-20261009/main/analysis/summary.csv",
+      "bytes": 448075,
+      "sha256": "12920cf54ee1ad31e0150e502bfeb0a370a8310a6f51879cb2df35264b2b1fd5"
+    },
+    "tables/contrasts.csv": {
+      "source": "code/output/experiment-study-20261009/main/analysis/contrasts.csv",
+      "bytes": 302343,
+      "sha256": "61c929684e006efe60b6469e506f90482fdf3570546165e0bc5818962faa1ae2"
+    },
+    "tables/probability_map_diagnostics.csv": {
+      "source": "code/output/experiment-study-20261009/main/analysis/probability_map_diagnostics.csv",
+      "bytes": 64879,
+      "sha256": "b8a9826bbf42b25be766b50cc75507caf34acb28352f6463170cff8054dec541"
+    },
+    "tables/rate_band_diagnostic.csv": {
+      "source": "code/output/experiment-study-20261009/main/analysis/rate_band_diagnostic.csv",
+      "bytes": 39069,
+      "sha256": "e3a489098c49341ba4ed57c0e0f1ab69a92df000f2439467ca4c0ff78005cc6c"
+    },
+    "metadata/main-audit.json": {
+      "source": "code/output/experiment-study-20261009/main/analysis/audit.json",
+      "bytes": 169,
+      "sha256": "2b006ebb3782cfd6698a8d33c3eee385e391efa2d04cc4558656dd5eb897a590"
+    },
+    "metadata/pilot-audit.json": {
+      "source": "code/output/experiment-study-20261009/pilot/analysis/audit.json",
+      "bytes": 166,
+      "sha256": "feb4c74fac99a4d1810a4334f6c96f376564421ef51093174186e4d9494ad55e"
+    },
+    "metadata/analysis.json": {
+      "source": "code/output/experiment-study-20261009/main/analysis/analysis.json",
+      "bytes": 112403,
+      "sha256": "7a9d7672248945ea35ae760245285bbcf8a16c9bbb12370dd880ae949d843d7b"
+    },
+    "metadata/rate_band_diagnostic.json": {
+      "source": "code/output/experiment-study-20261009/main/analysis/rate_band_diagnostic.json",
+      "bytes": 114004,
+      "sha256": "370a38e717bba5b5f34cdf73b3a3707c74846028ab811003364ab6627c9cdefc"
+    },
+    "metadata/regenerate_rate_band_diagnostic.py": {
+      "source": "code/output/experiment-study-20261009/main/analysis/regenerate_rate_band_diagnostic.py",
+      "bytes": 10815,
+      "sha256": "17e0891408400312f720266b71cb9953ee8713436a0168f319aeeb989577ecc3"
+    }
+  }
+}

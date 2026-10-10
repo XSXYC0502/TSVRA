@@ -16,7 +16,9 @@ Start with the repository [README](../README.md) for build and run commands. The
 | [Windows run guide](windows.md) | MSVC/MinGW builds and Windows troubleshooting |
 | [Roadmap](roadmap.md) | Implemented capabilities and proposed follow-up work |
 | [Report draft](report-draft.md) | Implementation-based prose for a project report and guidance on supporting results |
-| [Experiment plan, results and report](experiment-plan.md) | Proposed test design awaiting approval, execution record, and reserved sections for later results and the final report |
+| [Experiment report](experiment-report.md) | Completed 4,116-run study: methods, validated findings, figures, full latency sweep, limitations and reproduction |
+| [Report tables and figures](experiment-results/README.md) | Selected plots, complete cell summaries, paired contrasts, diagnostics and provenance copied into the documentation tree |
+| [Experiment plan and execution record](experiment-plan.md) | Approved design, correctness gate, pilot/main execution, detailed evidence and original final report |
 
 ## Retained research materials
 

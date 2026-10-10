@@ -1,0 +1,184 @@
+{
+  "output_dir": "code/output/experiment-study-20261009/pilot",
+  "jobs": 1,
+  "timeout_seconds": 300,
+  "defaults": {
+    "grid_factor": 4,
+    "simulation_cycles": 10000,
+    "failure_mode": "a",
+    "runtime_failure_rate": 0,
+    "redundancy": "shared",
+    "vertical_delay": 5,
+    "horizontal_delay": 500,
+    "router_delay": 15,
+    "request_probability": 0.02,
+    "max_path_length": 0,
+    "max_horizontal_distance": 0,
+    "reliability_min": 0,
+    "lambda1": 0,
+    "lambda2": 0,
+    "power_config": "code/config/power_model.ini",
+    "hotspot_count": 1,
+    "hotspot_radius": 3,
+    "hotspot_multiplier": 5,
+    "hotspot_centers": []
+  },
+  "configurations": [
+    {
+      "name": "U_pilot",
+      "parameters": {
+        "failure_model": "uniform",
+        "hotspot_count": 1,
+        "hotspot_centers": []
+      },
+      "matrix": {
+        "num_layers": [
+          2,
+          3,
+          4,
+          5
+        ],
+        "initial_failure_rate": [
+          0.05,
+          0.3,
+          0.7
+        ]
+      },
+      "seeds": [
+        901,
+        902,
+        903
+      ],
+      "repetitions": 3
+    },
+    {
+      "name": "H1_pilot",
+      "parameters": {
+        "failure_model": "hotspot",
+        "hotspot_count": 1,
+        "hotspot_centers": [
+          [
+            5,
+            5,
+            0
+          ]
+        ]
+      },
+      "matrix": {
+        "num_layers": [
+          2,
+          3,
+          4,
+          5
+        ],
+        "initial_failure_rate": [
+          0.05,
+          0.3,
+          0.7
+        ]
+      },
+      "seeds": [
+        901,
+        902,
+        903
+      ],
+      "repetitions": 3
+    },
+    {
+      "name": "H2_pilot",
+      "parameters": {
+        "failure_model": "hotspot",
+        "hotspot_count": 1,
+        "hotspot_centers": [
+          [
+            10,
+            10,
+            0
+          ]
+        ]
+      },
+      "matrix": {
+        "num_layers": [
+          2,
+          3,
+          4,
+          5
+        ],
+        "initial_failure_rate": [
+          0.05,
+          0.3,
+          0.7
+        ]
+      },
+      "seeds": [
+        901,
+        902,
+        903
+      ],
+      "repetitions": 3
+    },
+    {
+      "name": "H12_pilot",
+      "parameters": {
+        "failure_model": "hotspot",
+        "hotspot_count": 2,
+        "hotspot_centers": [
+          [
+            5,
+            5,
+            0
+          ],
+          [
+            10,
+            10,
+            0
+          ]
+        ]
+      },
+      "matrix": {
+        "num_layers": [
+          2,
+          3,
+          4,
+          5
+        ],
+        "initial_failure_rate": [
+          0.05,
+          0.3,
+          0.7
+        ]
+      },
+      "seeds": [
+        901,
+        902,
+        903
+      ],
+      "repetitions": 3
+    },
+    {
+      "name": "U_healthy_control",
+      "parameters": {
+        "failure_model": "uniform",
+        "hotspot_count": 1,
+        "hotspot_centers": []
+      },
+      "matrix": {
+        "num_layers": [
+          2,
+          3,
+          4,
+          5
+        ],
+        "initial_failure_rate": [
+          0
+        ]
+      },
+      "seeds": [
+        901,
+        902,
+        903
+      ],
+      "repetitions": 3
+    }
+  ]
+}
